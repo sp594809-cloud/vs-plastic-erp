@@ -1,0 +1,213 @@
+<!-- Sidebar -->
+<div id="sidebar-wrapper" class="no-print">
+    <div class="sidebar-heading">
+        <i class="fa-solid fa-industry me-2"></i>
+        <span>VS Plastic</span>
+    </div>
+    
+    <div class="sidebar-menu">
+        <ul class="nav flex-column">
+            <!-- Dashboard -->
+            <li class="nav-item">
+                <a class="nav-link <%= currentRoute === 'dashboard' ? 'active' : '' %>" href="/dashboard">
+                    <i class="fa-solid fa-chart-line"></i>
+                    <span><%= __('Dashboard') %></span>
+                </a>
+            </li>
+
+            <!-- Sales Menu -->
+            <li class="nav-header"><%= __('Sales') %></li>
+            <li class="nav-item">
+                <a class="nav-link <%= currentRoute === 'sales-bill' ? 'active' : '' %>" href="/sales/bill">
+                    <i class="fa-solid fa-file-invoice-dollar"></i>
+                    <span><%= __('Bills') %></span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link <%= currentRoute === 'sales-challan' ? 'active' : '' %>" href="/sales/challan">
+                    <i class="fa-solid fa-truck-ramp-box"></i>
+                    <span><%= __('Challan') %></span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link <%= currentRoute === 'sales-payment' ? 'active' : '' %>" href="/sales/payment">
+                    <i class="fa-solid fa-hand-holding-dollar"></i>
+                    <span><%= __('Sale Payment') %></span>
+                </a>
+            </li>
+
+            <!-- Purchase Menu -->
+            <li class="nav-header"><%= __('Purchase') %></li>
+            <li class="nav-item">
+                <a class="nav-link <%= currentRoute === 'purchase-bill' ? 'active' : '' %>" href="/purchase/bill">
+                    <i class="fa-solid fa-file-invoice"></i>
+                    <span><%= __('Purchase') %></span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link <%= currentRoute === 'purchase-payment' ? 'active' : '' %>" href="/purchase/payment">
+                    <i class="fa-solid fa-money-bill-transfer"></i>
+                    <span><%= __('Purchase Payment') %></span>
+                </a>
+            </li>
+
+            <!-- Transactions -->
+            <li class="nav-header"><%= __('Transactions') %></li>
+            <li class="nav-item">
+                <a class="nav-link <%= currentRoute === 'cash-records' ? 'active' : '' %>" href="/transactions/cash">
+                    <i class="fa-solid fa-wallet"></i>
+                    <span><%= __('Cash Records') %></span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link <%= currentRoute === 'bank-records' ? 'active' : '' %>" href="/transactions/bank">
+                    <i class="fa-solid fa-building-columns"></i>
+                    <span><%= __('Bank Records') %></span>
+                </a>
+            </li>
+
+            <!-- Stock -->
+            <li class="nav-header"><%= __('Stock') %></li>
+            <li class="nav-item">
+                <a class="nav-link <%= currentRoute === 'stock' ? 'active' : '' %>" href="/stock">
+                    <i class="fa-solid fa-cubes"></i>
+                    <span><%= __('Stock') %></span>
+                </a>
+            </li>
+
+            <!-- Reports -->
+            <li class="nav-header"><%= __('Reports') %></li>
+            <li class="nav-item">
+                <a class="nav-link <%= currentRoute === 'reports' ? 'active' : '' %>" href="/reports">
+                    <i class="fa-solid fa-file-contract"></i>
+                    <span><%= __('Reports') %></span>
+                </a>
+            </li>
+
+            <!-- Master Menu -->
+            <li class="nav-header"><%= __('Master') %></li>
+            <li class="nav-item">
+                <a class="nav-link <%= currentRoute === 'master-party' ? 'active' : '' %>" href="/master/party">
+                    <i class="fa-solid fa-users-gear"></i>
+                    <span><%= __('Party') %></span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link <%= currentRoute === 'master-products' ? 'active' : '' %>" href="/master/products">
+                    <i class="fa-solid fa-box-open"></i>
+                    <span><%= __('Products') %></span>
+                </a>
+            </li>
+
+            <!-- Settings -->
+            <li class="nav-header"><%= __('Settings') %></li>
+            <li class="nav-item">
+                <a class="nav-link <%= currentRoute === 'settings-year' ? 'active' : '' %>" href="/settings/year">
+                    <i class="fa-solid fa-calendar-days"></i>
+                    <span><%= __('Year') %></span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link <%= currentRoute === 'settings-unit' ? 'active' : '' %>" href="/settings/unit">
+                    <i class="fa-solid fa-scale-balanced"></i>
+                    <span><%= __('Unit') %></span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link <%= currentRoute === 'settings-company' ? 'active' : '' %>" href="/settings/company">
+                    <i class="fa-solid fa-building"></i>
+                    <span><%= __('Company') %></span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link <%= currentRoute === 'settings-tax' ? 'active' : '' %>" href="/settings/tax">
+                    <i class="fa-solid fa-percent"></i>
+                    <span><%= __('Tax') %></span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link <%= currentRoute === 'settings-bank' ? 'active' : '' %>" href="/settings/bank">
+                    <i class="fa-solid fa-piggy-bank"></i>
+                    <span><%= __('Bank') %></span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" href="/settings/backup">
+                    <i class="fa-solid fa-download"></i>
+                    <span><%= __('Download Backup') %></span>
+                </a>
+            </li>
+        </ul>
+    </div>
+</div>
+<!-- /#sidebar-wrapper -->
+
+<!-- Page Content -->
+<div id="page-content-wrapper">
+    <!-- Navbar -->
+    <nav class="navbar navbar-expand-lg top-navbar no-print">
+        <div class="container-fluid">
+            <button class="btn btn-outline-secondary me-3" id="menu-toggle">
+                <i class="fa-solid fa-bars"></i>
+            </button>
+            
+            <div class="navbar-brand"><%= companyName || 'VS Plastic' %></div>
+            
+            <div class="collapse navbar-collapse" id="navbarSupportedContent">
+                <ul class="navbar-nav ms-auto mb-2 mb-lg-0 align-items-center">
+                    <!-- Language Switcher -->
+                    <li class="nav-item dropdown me-3">
+                        <a class="nav-link dropdown-toggle btn btn-sm btn-light px-2" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                            <i class="fa-solid fa-language me-1 text-primary"></i>
+                            <%= currentLang === 'en' ? 'English' : 'ગુજરાતી' %>
+                        </a>
+                        <ul class="dropdown-menu dropdown-menu-end">
+                            <li><a class="dropdown-item" href="/lang/en">English</a></li>
+                            <li><a class="dropdown-item" href="/lang/gu">ગુજરાતી</a></li>
+                        </ul>
+                    </li>
+                    
+                    <!-- User Account -->
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle d-flex align-items-center" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                            <i class="fa-solid fa-circle-user fs-4 me-2 text-secondary"></i>
+                            <span class="fw-semibold"><%= username %></span>
+                        </a>
+                        <ul class="dropdown-menu dropdown-menu-end">
+                            <li>
+                                <a class="dropdown-item text-danger" href="/logout">
+                                    <i class="fa-solid fa-right-from-bracket me-2"></i><%= __('Logout') %>
+                                </a>
+                            </li>
+                        </ul>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content Area -->
+    <div class="container-fluid p-4">
+        <!-- Toast notifications placeholder -->
+        <div class="toast-container position-fixed top-0 end-0 p-3">
+            <% if (typeof success_msg !== 'undefined' && success_msg) { %>
+                <div class="toast show align-items-center text-white bg-success border-0" role="alert" aria-live="assertive" aria-atomic="true">
+                    <div class="d-flex">
+                        <div class="toast-body">
+                            <i class="fa-solid fa-circle-check me-2"></i><%= success_msg %>
+                        </div>
+                        <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+                    </div>
+                </div>
+            <% } %>
+            <% if (typeof error_msg !== 'undefined' && error_msg) { %>
+                <div class="toast show align-items-center text-white bg-danger border-0" role="alert" aria-live="assertive" aria-atomic="true">
+                    <div class="d-flex">
+                        <div class="toast-body">
+                            <i class="fa-solid fa-circle-exclamation me-2"></i><%= error_msg %>
+                        </div>
+                        <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+                    </div>
+                </div>
+            <% } %>
+        </div>

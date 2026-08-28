@@ -1,0 +1,221 @@
+<%- include('../layouts/header') %>
+<%- include('../layouts/sidebar') %>
+
+<!-- Print control bar (hidden when printing) -->
+<div class="row mb-3 align-items-center no-print">
+    <div class="col-sm-6">
+        <h1 class="m-0 text-dark">Invoice Preview</h1>
+    </div>
+    <div class="col-sm-6 text-end">
+        <a href="/sales/bill" class="btn btn-secondary me-2">
+            <i class="fa-solid fa-arrow-left me-1"></i>Back to List
+        </a>
+        <button onclick="window.print()" class="btn btn-dark">
+            <i class="fa-solid fa-print me-1"></i>Print Invoice (A4)
+        </button>
+    </div>
+</div>
+
+<div class="print-invoice-box">
+    <!-- GST Tax Invoice Header -->
+    <div class="row align-items-center border-bottom pb-3 mb-4">
+        <div class="col-md-6">
+            <div class="invoice-header-title text-uppercase"><%= invoice.type === 'Invoice' ? 'Tax Invoice' : 'Delivery Challan' %></div>
+            <div class="text-muted">Original for Recipient</div>
+        </div>
+        <div class="col-md-6 text-end">
+            <h4 class="fw-bold text-primary mb-0"><%= company.name %></h4>
+            <small class="text-muted"><%= company.address %></small><br>
+            <small class="text-muted">GSTIN: <strong><%= company.gstin %></strong> | Mobile: <%= company.phone %></small>
+        </div>
+    </div>
+
+    <!-- Invoice Meta Metadata -->
+    <div class="row border-bottom pb-3 mb-4">
+        <div class="col-sm-4 border-end">
+            <span class="invoice-meta-label">Invoice Details:</span>
+            <div class="mt-1">
+                <strong>Invoice No:</strong> <%= invoice.invoice_no %><br>
+                <strong>Date:</strong> <%= new Date(invoice.date).toLocaleDateString('en-GB') %><br>
+                <strong>Financial Year:</strong> <%= financialYear %><br>
+            </div>
+        </div>
+        <div class="col-sm-4 border-end">
+            <span class="invoice-meta-label">Billed To (Party):</span>
+            <div class="mt-1">
+                <strong><%= party.name %></strong><br>
+                <%= party.address %><br>
+                <strong>GSTIN:</strong> <%= party.gstin || 'N/A' %><br>
+                <strong>State:</strong> <%= party.state || 'N/A' %> (Code: <%= party.state_code || 'N/A' %>)<br>
+                <strong>Mobile:</strong> <%= party.mobile || 'N/A' %>
+            </div>
+        </div>
+        <div class="col-sm-4">
+            <span class="invoice-meta-label">Shipped To:</span>
+            <div class="mt-1">
+                <strong><%= party.name %></strong><br>
+                <%= party.shipping_address || party.address %><br>
+            </div>
+        </div>
+    </div>
+
+    <!-- Items Grid Table -->
+    <div class="table-responsive mb-4">
+        <table class="table table-bordered table-sm align-middle">
+            <thead class="table-light text-center">
+                <tr>
+                    <th rowspan="2" style="width: 5%;">#</th>
+                    <th rowspan="2" style="width: 25%;">Product Description</th>
+                    <th rowspan="2" style="width: 8%;">HSN/SAC</th>
+                    <th rowspan="2" style="width: 6%;">Bags</th>
+                    <th rowspan="2" style="width: 10%;">Quantity</th>
+                    <th rowspan="2" style="width: 8%;">Rate (₹)</th>
+                    <th rowspan="2" style="width: 10%;">Amount (₹)</th>
+                    <% if (taxMode === 'intra') { %>
+                        <th colspan="2" style="width: 10%;">CGST</th>
+                        <th colspan="2" style="width: 10%;">SGST</th>
+                    <% } else { %>
+                        <th colspan="2" style="width: 15%;">IGST</th>
+                    <% } %>
+                    <th rowspan="2" style="width: 13%;">Total (₹)</th>
+                </tr>
+                <tr>
+                    <% if (taxMode === 'intra') { %>
+                        <th>%</th>
+                        <th>Amt (₹)</th>
+                        <th>%</th>
+                        <th>Amt (₹)</th>
+                    <% } else { %>
+                        <th>%</th>
+                        <th>Amt (₹)</th>
+                    <% } %>
+                </tr>
+            </thead>
+            <tbody>
+                <% items.forEach((item, index) => { %>
+                    <tr>
+                        <td class="text-center"><%= index + 1 %></td>
+                        <td><strong><%= item.product_name %></strong></td>
+                        <td class="text-center"><%= item.hsn_sac || '-' %></td>
+                        <td class="text-center"><%= item.bags || '-' %></td>
+                        <td class="text-end"><%= item.quantity %> <%= item.unit %></td>
+                        <td class="text-end">₹<%= item.rate.toFixed(2) %></td>
+                        <td class="text-end">₹<%= item.amount.toFixed(2) %></td>
+                        <% if (taxMode === 'intra') { %>
+                            <td class="text-center"><%= item.cgst_percent %>%</td>
+                            <td class="text-end">₹<%= item.cgst_amount.toFixed(2) %></td>
+                            <td class="text-center"><%= item.sgst_percent %>%</td>
+                            <td class="text-end">₹<%= item.sgst_amount.toFixed(2) %></td>
+                        <% } else { %>
+                            <td class="text-center"><%= item.igst_percent %>%</td>
+                            <td class="text-end">₹<%= item.igst_amount.toFixed(2) %></td>
+                        <% } %>
+                        <td class="text-end fw-bold">₹<%= item.total.toFixed(2) %></td>
+                    </tr>
+                <% }) %>
+                <!-- Empty padding rows for neat A4 layout height -->
+                <% for (let i = items.length; i < 5; i++) { %>
+                    <tr style="height: 30px;">
+                        <td></td><td></td><td></td><td></td><td></td><td></td><td></td>
+                        <% if (taxMode === 'intra') { %>
+                            <td></td><td></td><td></td><td></td>
+                        <% } else { %>
+                            <td></td><td></td>
+                        <% } %>
+                        <td></td>
+                    </tr>
+                <% } %>
+                <!-- Totals row -->
+                <tr class="table-light fw-bold">
+                    <td colspan="3" class="text-center">Total</td>
+                    <td class="text-center"><%= items.reduce((acc, it) => acc + (it.bags || 0), 0) %></td>
+                    <td class="text-end"><%= items.reduce((acc, it) => acc + it.quantity, 0).toFixed(2) %></td>
+                    <td></td>
+                    <td class="text-end">₹<%= invoice.sub_total.toFixed(2) %></td>
+                    <% if (taxMode === 'intra') { %>
+                        <td></td>
+                        <td class="text-end">₹<%= items.reduce((acc, it) => acc + it.cgst_amount, 0).toFixed(2) %></td>
+                        <td></td>
+                        <td class="text-end">₹<%= items.reduce((acc, it) => acc + it.sgst_amount, 0).toFixed(2) %></td>
+                    <% } else { %>
+                        <td></td>
+                        <td class="text-end">₹<%= items.reduce((acc, it) => acc + it.igst_amount, 0).toFixed(2) %></td>
+                    <% } %>
+                    <td class="text-end">₹<%= (invoice.sub_total + invoice.tax_total).toFixed(2) %></td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Bottom summary row -->
+    <div class="row">
+        <!-- Amount in words & Bank info -->
+        <div class="col-md-7">
+            <div class="border p-2 mb-3 bg-light rounded">
+                <strong>Amount in Words:</strong><br>
+                <span class="text-capitalize text-primary"><%= grandTotalWords %> Only</span>
+            </div>
+            
+            <div class="border p-2 rounded">
+                <strong>Our Bank Account Details:</strong><br>
+                Bank Name: <strong><%= company.bank_name %></strong><br>
+                A/C No: <strong><%= company.bank_ac_no %></strong><br>
+                IFSC: <strong><%= company.bank_ifsc %></strong> | Branch: <%= company.bank_branch %>
+            </div>
+        </div>
+
+        <!-- Right Side summary and signatures -->
+        <div class="col-md-5">
+            <table class="table table-bordered table-sm align-middle text-end mb-3">
+                <tr>
+                    <td class="fw-bold">Sub-Total Amount:</td>
+                    <td style="width: 40%;">₹<%= invoice.sub_total.toFixed(2) %></td>
+                </tr>
+                <% if (taxMode === 'intra') { %>
+                    <tr>
+                        <td class="text-muted">Add CGST:</td>
+                        <td>₹<%= (invoice.tax_total / 2).toFixed(2) %></td>
+                    </tr>
+                    <tr>
+                        <td class="text-muted">Add SGST:</td>
+                        <td>₹<%= (invoice.tax_total / 2).toFixed(2) %></td>
+                    </tr>
+                <% } else { %>
+                    <tr>
+                        <td class="text-muted">Add IGST:</td>
+                        <td>₹<%= invoice.tax_total.toFixed(2) %></td>
+                    </tr>
+                <% } %>
+                <tr>
+                    <td class="fw-bold">Total Taxes:</td>
+                    <td>₹<%= invoice.tax_total.toFixed(2) %></td>
+                </tr>
+                <tr>
+                    <td class="text-muted">Round Off:</td>
+                    <td>₹<%= invoice.round_off.toFixed(2) %></td>
+                </tr>
+                <tr class="table-dark fs-6 text-white fw-bold">
+                    <td>Grand Total Amount:</td>
+                    <td>₹<%= invoice.grand_total.toFixed(2) %></td>
+                </tr>
+            </table>
+        </div>
+    </div>
+
+    <!-- Signatures -->
+    <div class="row mt-5">
+        <div class="col-6">
+            <div class="pt-5 border-top text-center text-muted" style="width: 60%; margin-top: 50px;">
+                Receiver's Signature
+            </div>
+        </div>
+        <div class="col-6 text-end">
+            <div class="d-inline-block text-center text-muted" style="width: 60%; margin-top: 50px;">
+                For, <strong><%= company.name %></strong>
+                <div class="pt-5 mt-4 border-top">Authorized Signatory</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<%- include('../layouts/footer') %>

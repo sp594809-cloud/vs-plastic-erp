@@ -1,0 +1,198 @@
+<%- include('../layouts/header') %>
+<%- include('../layouts/sidebar') %>
+
+<div class="row mb-3 align-items-center">
+    <div class="col-sm-6">
+        <h1 class="m-0 text-dark"><%= __('Sale Payment') %></h1>
+    </div>
+</div>
+
+<div class="row">
+    <!-- Record Payment Form (Left Column) -->
+    <div class="col-md-4 mb-4">
+        <div class="card">
+            <div class="card-header bg-light">
+                <i class="fa-solid fa-square-plus me-2 text-primary"></i>Record Sale Receipt
+            </div>
+            <div class="card-body">
+                <form action="/sales/payment/add" method="POST" id="paymentForm">
+                    <!-- Party Select -->
+                    <div class="mb-3">
+                        <label class="form-label fw-bold"><%= __('Select Party') %> <span class="text-danger">*</span></label>
+                        <select name="party_id" id="payment_party_id" class="form-select select2" required>
+                            <option value="">-- Choose Party --</option>
+                            <% parties.forEach(pty => { %>
+                                <option value="<%= pty.id %>" data-balance="<%= pty.current_balance %>"><%= pty.name %></option>
+                            <% }) %>
+                        </select>
+                        <div class="mt-2" id="partyOutstandingDisplay" style="display:none;">
+                            <small class="text-muted">Current Balance: <strong id="outstandingAmt" class="text-success">₹0.00 Dr</strong></small>
+                        </div>
+                    </div>
+
+                    <!-- Invoice Link (Optional) -->
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Link to Invoice (Optional)</label>
+                        <select name="invoice_id" id="payment_invoice_id" class="form-select select2">
+                            <option value="">-- Direct Ledger Credit --</option>
+                        </select>
+                    </div>
+
+                    <!-- Payment Mode -->
+                    <div class="mb-3">
+                        <label class="form-label fw-bold"><%= __('Payment Mode') %> <span class="text-danger">*</span></label>
+                        <select name="payment_mode" id="payment_mode" class="form-select select2" required>
+                            <option value="Cash">Cash</option>
+                            <option value="Bank">Bank Transfer</option>
+                            <option value="Cheque">Cheque</option>
+                            <option value="UPI">UPI / GPay / PhonePe</option>
+                        </select>
+                    </div>
+
+                    <!-- Bank Account Select (if Bank/Cheque/UPI) -->
+                    <div class="mb-3 d-none" id="bankSelectDiv">
+                        <label class="form-label fw-bold">Deposit to Bank Account <span class="text-danger">*</span></label>
+                        <select name="bank_id" id="bank_id" class="form-select select2">
+                            <option value="">-- Select Bank Account --</option>
+                            <% banks.forEach(bk => { %>
+                                <option value="<%= bk.id %>"><%= bk.name %> (A/C: ...<%= bk.ac_no.slice(-4) %>)</option>
+                            <% }) %>
+                        </select>
+                    </div>
+
+                    <!-- Reference No -->
+                    <div class="mb-3">
+                        <label class="form-label fw-bold"><%= __('Reference No') %> (UPI / Cheque / Tx ID)</label>
+                        <input type="text" name="reference_no" class="form-control" placeholder="Enter Ref / Tx ID">
+                    </div>
+
+                    <!-- Amount -->
+                    <div class="mb-3">
+                        <label class="form-label fw-bold"><%= __('Amount Paid') %> (₹) <span class="text-danger">*</span></label>
+                        <input type="number" step="0.01" name="amount" id="payment_amount" class="form-control" required min="0.01" placeholder="0.00">
+                    </div>
+
+                    <!-- Date -->
+                    <div class="mb-3">
+                        <label class="form-label fw-bold"><%= __('Date') %> <span class="text-danger">*</span></label>
+                        <input type="date" name="date" class="form-control" value="<%= todayDate %>" required>
+                    </div>
+
+                    <!-- Notes -->
+                    <div class="mb-3">
+                        <label class="form-label fw-bold"><%= __('Notes') %></label>
+                        <textarea name="notes" class="form-control" rows="2" placeholder="Payment remarks..."></textarea>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary w-100">
+                        <i class="fa-solid fa-circle-check me-1"></i>Save Receipt
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Payments Ledger List (Right Column) -->
+    <div class="col-md-8 mb-4">
+        <div class="card">
+            <div class="card-header bg-light">
+                <i class="fa-solid fa-list-ul me-2 text-primary"></i>Recent Receipts History
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table id="paymentsTable" class="table table-bordered table-striped table-hover align-middle">
+                        <thead>
+                            <tr>
+                                <th><%= __('Date') %></th>
+                                <th><%= __('Party Name') %></th>
+                                <th>Invoice Link</th>
+                                <th>Mode</th>
+                                <th class="text-end">Amount Recd</th>
+                                <th class="text-center no-print"><%= __('Actions') %></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <% payments.forEach(pay => { %>
+                                <tr>
+                                    <td><%= new Date(pay.date).toLocaleDateString('en-GB') %></td>
+                                    <td class="fw-bold"><%= pay.party_name %></td>
+                                    <td>
+                                        <% if (pay.invoice_no) { %>
+                                            <a href="/sales/bill/print/<%= pay.invoice_id %>" class="fw-bold text-decoration-none"><%= pay.invoice_no %></a>
+                                        <% } else { %>
+                                            <span class="text-muted">Direct Ledger</span>
+                                        <% } %>
+                                    </td>
+                                    <td>
+                                        <span class="badge bg-secondary"><%= pay.payment_mode %></span>
+                                        <% if (pay.reference_no) { %>
+                                            <div class="text-muted" style="font-size:0.8rem;"><%= pay.reference_no %></div>
+                                        <% } %>
+                                    </td>
+                                    <td class="text-end fw-bold text-success">₹<%= pay.amount.toFixed(2) %></td>
+                                    <td class="text-center no-print">
+                                        <a href="/sales/payment/delete/<%= pay.id %>" class="btn btn-sm btn-outline-danger" onclick="return confirm('Are you sure you want to delete this payment receipt? This will revert the party balance.');">
+                                            <i class="fa-solid fa-trash"></i>
+                                        </a>
+                                    </td>
+                                </tr>
+                            <% }) %>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    document.addEventListener("DOMContentLoaded", function() {
+        // Toggle Bank selector
+        $('#payment_mode').on('change', function() {
+            const mode = $(this).val();
+            if (mode === 'Cash') {
+                $('#bankSelectDiv').addClass('d-none');
+                $('#bank_id').attr('required', false);
+            } else {
+                $('#bankSelectDiv').removeClass('d-none');
+                $('#bank_id').attr('required', true);
+            }
+        });
+
+        // Watch Party to pull outstanding balance & outstanding invoices
+        $('#payment_party_id').on('change', function() {
+            const partyId = $(this).val();
+            const selectedOpt = $(this).find(':selected');
+            
+            if (!partyId) {
+                $('#partyOutstandingDisplay').hide();
+                $('#payment_invoice_id').html('<option value="">-- Direct Ledger Credit --</option>');
+                return;
+            }
+
+            // Show outstanding balance
+            const balance = parseFloat(selectedOpt.data('balance')) || 0;
+            const balText = balance >= 0 ? `₹${balance.toFixed(2)} Dr (Receivable)` : `₹${Math.abs(balance).toFixed(2)} Cr (Payable)`;
+            $('#outstandingAmt').text(balText);
+            $('#outstandingAmt').removeClass('text-success text-danger').addClass(balance >= 0 ? 'text-success' : 'text-danger');
+            $('#partyOutstandingDisplay').show();
+
+            // Load outstanding invoices for this party
+            $.get(`/api/outstanding-invoices/${partyId}`, function(invoices) {
+                let options = '<option value="">-- Direct Ledger Credit --</option>';
+                invoices.forEach(inv => {
+                    options += `<option value="${inv.id}" data-total="${inv.grand_total}">Inv: ${inv.invoice_no} (Total: ₹${inv.grand_total.toFixed(2)})</option>`;
+                });
+                $('#payment_invoice_id').html(options);
+            });
+        });
+
+        // Initialize DataTable
+        $('#paymentsTable').DataTable({
+            language: window.dtLanguageConfig,
+            order: [[0, 'desc']]
+        });
+    });
+</script>
+
+<%- include('../layouts/footer') %>

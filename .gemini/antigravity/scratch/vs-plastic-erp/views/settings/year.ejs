@@ -1,0 +1,77 @@
+<%- include('../layouts/header') %>
+<%- include('../layouts/sidebar') %>
+
+<div class="row mb-3 align-items-center">
+    <div class="col-sm-6">
+        <h1 class="m-0 text-dark">Financial Year Settings</h1>
+    </div>
+</div>
+
+<div class="row">
+    <!-- Add Year (Left Panel) -->
+    <div class="col-md-4 mb-4">
+        <div class="card">
+            <div class="card-header bg-light">Create Financial Year</div>
+            <div class="card-body">
+                <form action="/settings/year/add" method="POST">
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Financial Year Name <span class="text-danger">*</span></label>
+                        <input type="text" name="name" class="form-control" placeholder="e.g. 2026-2027" required>
+                        <small class="text-muted">Must be formatted as YYYY-YYYY.</small>
+                    </div>
+                    <button type="submit" class="btn btn-primary w-100">
+                        <i class="fa-solid fa-plus me-1"></i>Add Year
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Years List (Right Panel) -->
+    <div class="col-md-8 mb-4">
+        <div class="card">
+            <div class="card-header bg-light">Available Financial Years</div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Financial Year</th>
+                                <th>Status</th>
+                                <th class="text-center">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <% years.forEach(yr => { %>
+                                <tr>
+                                    <td class="fw-bold"><%= yr.name %></td>
+                                    <td>
+                                        <% if (yr.is_active === 1) { %>
+                                            <span class="badge bg-success"><i class="fa-solid fa-circle-check me-1"></i><%= __('Active') %></span>
+                                        <% } else { %>
+                                            <span class="badge bg-secondary"><%= __('Inactive') %></span>
+                                        <% } %>
+                                    </td>
+                                    <td class="text-center">
+                                        <% if (yr.is_active !== 1) { %>
+                                            <a href="/settings/year/activate/<%= yr.id %>" class="btn btn-sm btn-outline-success">
+                                                <i class="fa-solid fa-check me-1"></i>Make Active
+                                            </a>
+                                            <a href="/settings/year/delete/<%= yr.id %>" class="btn btn-sm btn-outline-danger ms-2" onclick="return confirm('Are you sure you want to delete this year?');">
+                                                <i class="fa-solid fa-trash"></i>
+                                            </a>
+                                        <% } else { %>
+                                            <span class="text-muted small">Active Year Locked</span>
+                                        <% } %>
+                                    </td>
+                                </tr>
+                            <% }) %>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<%- include('../layouts/footer') %>

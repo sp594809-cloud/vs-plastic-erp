@@ -1,0 +1,136 @@
+<%- include('../layouts/header') %>
+<%- include('../layouts/sidebar') %>
+
+<div class="row mb-3 align-items-center">
+    <div class="col-sm-6">
+        <h1 class="m-0 text-dark"><%= reportType === 'sales' ? 'Sales' : 'Purchase' %> Register</h1>
+    </div>
+    <div class="col-sm-6 text-end">
+        <a href="/reports" class="btn btn-outline-secondary">
+            <i class="fa-solid fa-arrow-left me-1"></i>Back to Reports
+        </a>
+    </div>
+</div>
+
+<!-- Filters Card -->
+<div class="card mb-4 no-print">
+    <div class="card-header bg-light">Filter Criteria</div>
+    <div class="card-body">
+        <form action="<%= reportType === 'sales' ? '/reports/sales-register' : '/reports/purchase-register' %>" method="GET">
+            <div class="row">
+                <div class="col-md-3 mb-3">
+                    <label class="form-label">Start Date</label>
+                    <input type="date" name="start_date" class="form-control" value="<%= filters.start_date %>">
+                </div>
+                <div class="col-md-3 mb-3">
+                    <label class="form-label">End Date</label>
+                    <input type="date" name="end_date" class="form-control" value="<%= filters.end_date %>">
+                </div>
+                <div class="col-md-3 mb-3">
+                    <label class="form-label">Party Filter</label>
+                    <select name="party_id" class="form-select select2">
+                        <option value="">All Parties</option>
+                        <% parties.forEach(pty => { %>
+                            <option value="<%= pty.id %>" <%= filters.party_id == pty.id ? 'selected' : '' %>><%= pty.name %></option>
+                        <% }) %>
+                    </select>
+                </div>
+                <div class="col-md-3 mb-3 d-flex align-items-end">
+                    <button type="submit" class="btn btn-primary w-100 me-2">
+                        <i class="fa-solid fa-filter me-1"></i>Apply Filter
+                    </button>
+                    <a href="<%= reportType === 'sales' ? '/reports/sales-register' : '/reports/purchase-register' %>" class="btn btn-outline-secondary">Reset</a>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Results Card -->
+<div class="card">
+    <div class="card-body">
+        <div class="table-responsive">
+            <table id="registerTable" class="table table-bordered table-striped table-hover align-middle">
+                <thead>
+                    <tr>
+                        <th>Invoice No</th>
+                        <th><%= __('Date') %></th>
+                        <th><%= __('Company') %></th>
+                        <th><%= __('Party Name') %></th>
+                        <th class="text-end"><%= __('Sub Total') %></th>
+                        <th class="text-end"><%= __('Tax Total') %></th>
+                        <th class="text-end"><%= __('Round Off') %></th>
+                        <th class="text-end fw-bold"><%= __('Grand Total') %></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <% let subTotalSum = 0, taxTotalSum = 0, roundOffSum = 0, grandTotalSum = 0; %>
+                    <% invoices.forEach(inv => { %>
+                        <% subTotalSum += inv.sub_total; %>
+                        <% taxTotalSum += inv.tax_total; %>
+                        <% roundOffSum += inv.round_off; %>
+                        <% grandTotalSum += inv.grand_total; %>
+                        <tr>
+                            <td class="fw-bold">
+                                <% if (reportType === 'sales') { %>
+                                    <a href="/sales/bill/print/<%= inv.id %>" class="text-decoration-none"><%= inv.invoice_no %></a>
+                                <% } else { %>
+                                    <%= inv.invoice_no %>
+                                <% } %>
+                            </td>
+                            <td><%= new Date(inv.date).toLocaleDateString('en-GB') %></td>
+                            <td><%= inv.company_name %></td>
+                            <td><%= inv.party_name %></td>
+                            <td class="text-end">₹<%= inv.sub_total.toFixed(2) %></td>
+                            <td class="text-end">₹<%= inv.tax_total.toFixed(2) %></td>
+                            <td class="text-end text-muted">₹<%= inv.round_off.toFixed(2) %></td>
+                            <td class="text-end fw-bold">₹<%= inv.grand_total.toFixed(2) %></td>
+                        </tr>
+                    <% }) %>
+                </tbody>
+                <tfoot class="table-light fw-bold">
+                    <tr>
+                        <td colspan="4" class="text-center">Total Summary</td>
+                        <td class="text-end">₹<%= subTotalSum.toFixed(2) %></td>
+                        <td class="text-end">₹<%= taxTotalSum.toFixed(2) %></td>
+                        <td class="text-end text-muted">₹<%= roundOffSum.toFixed(2) %></td>
+                        <td class="text-end">₹<%= grandTotalSum.toFixed(2) %></td>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+    window.addEventListener('DOMContentLoaded', () => {
+        $('#registerTable').DataTable({
+            language: window.dtLanguageConfig,
+            dom: 'Bfrtip',
+            buttons: [
+                {
+                    extend: 'excelHtml5',
+                    text: '<i class="fa-solid fa-file-excel me-1"></i> Excel',
+                    className: 'btn btn-success btn-sm',
+                    footer: true
+                },
+                {
+                    extend: 'pdfHtml5',
+                    text: '<i class="fa-solid fa-file-pdf me-1"></i> PDF',
+                    className: 'btn btn-danger btn-sm',
+                    footer: true
+                },
+                {
+                    extend: 'print',
+                    text: '<i class="fa-solid fa-print me-1"></i> Print',
+                    className: 'btn btn-dark btn-sm',
+                    footer: true
+                }
+            ],
+            pageLength: 25,
+            order: [[1, 'desc']]
+        });
+    });
+</script>
+
+<%- include('../layouts/footer') %>

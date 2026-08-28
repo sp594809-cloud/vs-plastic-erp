@@ -1,0 +1,472 @@
+<%- include('../layouts/header') %>
+<%- include('../layouts/sidebar') %>
+
+<div class="row mb-3 align-items-center">
+    <div class="col-sm-6">
+        <h1 class="m-0 text-dark"><%= isEdit ? __('Edit Bill/Challan') : __('Create Bill') %></h1>
+    </div>
+    <div class="col-sm-6 text-end">
+        <span class="badge bg-secondary p-2">
+            <i class="fa-solid fa-building me-1"></i>Company GST: <span id="companyGstDisplay"><%= activeCompany.gstin %></span> (Code: <span id="companyStateDisplay"><%= activeCompany.gstin.substring(0, 2) %></span>)
+        </span>
+    </div>
+</div>
+
+<form action="<%= isEdit ? '/sales/bill/edit/' + invoice.id : '/sales/bill/add' %>" method="POST" id="billForm">
+    <input type="hidden" name="company_state_code" id="company_state_code" value="<%= activeCompany.gstin.substring(0, 2) %>">
+    <input type="hidden" name="tax_mode" id="tax_mode" value="intra"> <!-- "intra" (same state: CGST/SGST) or "inter" (different: IGST) -->
+
+    <div class="card mb-4">
+        <div class="card-header bg-light">
+            <i class="fa-solid fa-circle-info me-2 text-primary"></i>Invoice / Challan Information
+        </div>
+        <div class="card-body">
+            <div class="row">
+                <!-- Toggle: Invoice / Challan -->
+                <div class="col-md-3 mb-3">
+                    <label class="form-label fw-bold"><%= __('Invoice Type') %> <span class="text-danger">*</span></label>
+                    <select name="type" id="invoiceType" class="form-select select2" required>
+                        <option value="Invoice" <%= isEdit && invoice.type === 'Invoice' ? 'selected' : '' %>><%= __('Invoice') %></option>
+                        <option value="Challan" <%= isEdit && invoice.type === 'Challan' ? 'selected' : '' %>><%= __('Challan') %></option>
+                    </select>
+                </div>
+
+                <!-- Company Selector -->
+                <div class="col-md-3 mb-3">
+                    <label class="form-label fw-bold"><%= __('Select Company') %> <span class="text-danger">*</span></label>
+                    <select name="company_id" id="company_id" class="form-select select2" required>
+                        <% companies.forEach(comp => { %>
+                            <option value="<%= comp.id %>" data-gstin="<%= comp.gstin %>" <%= (isEdit && invoice.company_id === comp.id) || comp.id === activeCompany.id ? 'selected' : '' %>><%= comp.name %></option>
+                        <% }) %>
+                    </select>
+                </div>
+
+                <!-- Financial Year -->
+                <div class="col-md-2 mb-3">
+                    <label class="form-label fw-bold"><%= __('Select Year') %> <span class="text-danger">*</span></label>
+                    <select name="financial_year_id" class="form-select select2" required>
+                        <% years.forEach(yr => { %>
+                            <option value="<%= yr.id %>" <%= (isEdit && invoice.financial_year_id === yr.id) || yr.is_active === 1 ? 'selected' : '' %>><%= yr.name %></option>
+                        <% }) %>
+                    </select>
+                </div>
+
+                <!-- Invoice Number -->
+                <div class="col-md-2 mb-3">
+                    <label class="form-label fw-bold"><%= __('Invoice/Challan No') %> <span class="text-danger">*</span></label>
+                    <input type="text" name="invoice_no" id="invoice_no" class="form-control" value="<%= isEdit ? invoice.invoice_no : nextInvoiceNo %>" required readonly>
+                    <small class="text-muted">Auto-generated</small>
+                </div>
+
+                <!-- Date Picker -->
+                <div class="col-md-2 mb-3">
+                    <label class="form-label fw-bold"><%= __('Date') %> <span class="text-danger">*</span></label>
+                    <input type="date" name="date" class="form-control" value="<%= isEdit ? invoice.date : todayDate %>" required>
+                </div>
+
+                <!-- Party Selector -->
+                <div class="col-md-6 mb-3">
+                    <label class="form-label fw-bold"><%= __('Select Party') %> <span class="text-danger">*</span></label>
+                    <select name="party_id" id="party_id" class="form-select select2" required>
+                        <option value="">-- Choose Customer / Supplier --</option>
+                        <% parties.forEach(pty => { %>
+                            <option value="<%= pty.id %>" <%= isEdit && invoice.party_id === pty.id ? 'selected' : '' %>><%= pty.name %> (<%= pty.type %>)</option>
+                        <% }) %>
+                    </select>
+                </div>
+
+                <!-- GST Number Display (ReadOnly) -->
+                <div class="col-md-3 mb-3">
+                    <label class="form-label fw-bold"><%= __('GST Number') %></label>
+                    <input type="text" id="party_gstin" class="form-control" readonly placeholder="Party GSTIN">
+                </div>
+
+                <!-- GST State Display (ReadOnly) -->
+                <div class="col-md-3 mb-3">
+                    <label class="form-label fw-bold"><%= __('GST State') %></label>
+                    <input type="text" id="party_state" class="form-control" readonly placeholder="State (Code)">
+                </div>
+
+                <!-- Billing Address (ReadOnly) -->
+                <div class="col-md-6 mb-3">
+                    <label class="form-label fw-bold"><%= __('Address') %></label>
+                    <textarea id="party_address" class="form-control" rows="2" readonly placeholder="Party Billing Address"></textarea>
+                </div>
+
+                <!-- Shipping Address (ReadOnly) -->
+                <div class="col-md-6 mb-3">
+                    <label class="form-label fw-bold"><%= __('Shipping Address') %></label>
+                    <textarea id="party_shipping" class="form-control" rows="2" readonly placeholder="Party Shipping Address"></textarea>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Product Line Items Card -->
+    <div class="card mb-4">
+        <div class="card-header bg-light d-flex justify-content-between align-items-center">
+            <span><i class="fa-solid fa-list me-2 text-primary"></i>Product Details</span>
+            <button type="button" class="btn btn-sm btn-success" id="addRowBtn">
+                <i class="fa-solid fa-plus me-1"></i><%= __('Add Item') %>
+            </button>
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-bordered align-middle mb-0" id="productTable">
+                    <thead class="table-light">
+                        <tr>
+                            <th style="width: 30%;"><%= __('Product') %></th>
+                            <th style="width: 10%;"><%= __('Bags') %></th>
+                            <th style="width: 12%;"><%= __('Quantity') %></th>
+                            <th style="width: 10%;"><%= __('Unit') %></th>
+                            <th style="width: 12%;"><%= __('Rate') %> (₹)</th>
+                            <th style="width: 13%;"><%= __('Amount') %> (₹)</th>
+                            <th class="tax-headers" style="width: 10%;">Taxes</th>
+                            <th style="width: 13%;"><%= __('Total') %> (₹)</th>
+                            <th class="no-print" style="width: 5%;"></th>
+                        </tr>
+                    </thead>
+                    <tbody id="productTableBody">
+                        <!-- Rows dynamically generated here -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Invoice Summary Grid -->
+    <div class="row">
+        <div class="col-md-6 mb-3">
+            <div class="card h-100">
+                <div class="card-header bg-light"><%= __('Notes') %> / Remarks</div>
+                <div class="card-body">
+                    <textarea name="notes" class="form-control h-100" rows="4" placeholder="Enter remarks or additional invoice terms..."><%= isEdit ? invoice.notes : '' %></textarea>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-6 mb-3">
+            <div class="card h-100">
+                <div class="card-body">
+                    <div class="row mb-2">
+                        <div class="col-6 fw-bold"><%= __('Sub Total') %>:</div>
+                        <div class="col-6 text-end"><span id="subTotalDisplay">₹0.00</span></div>
+                        <input type="hidden" name="sub_total" id="sub_total_input" value="0.00">
+                    </div>
+                    <div class="row mb-2 d-none" id="cgstRow">
+                        <div class="col-6 fw-bold"><%= __('CGST') %> Total:</div>
+                        <div class="col-6 text-end text-muted"><span id="cgstTotalDisplay">₹0.00</span></div>
+                    </div>
+                    <div class="row mb-2 d-none" id="sgstRow">
+                        <div class="col-6 fw-bold"><%= __('SGST') %> Total:</div>
+                        <div class="col-6 text-end text-muted"><span id="sgstTotalDisplay">₹0.00</span></div>
+                    </div>
+                    <div class="row mb-2 d-none" id="igstRow">
+                        <div class="col-6 fw-bold"><%= __('IGST') %> Total:</div>
+                        <div class="col-6 text-end text-muted"><span id="igstTotalDisplay">₹0.00</span></div>
+                    </div>
+                    <div class="row mb-2">
+                        <div class="col-6 fw-bold"><%= __('Tax Total') %>:</div>
+                        <div class="col-6 text-end"><span id="taxTotalDisplay">₹0.00</span></div>
+                        <input type="hidden" name="tax_total" id="tax_total_input" value="0.00">
+                    </div>
+                    <div class="row mb-2">
+                        <div class="col-6 fw-bold"><%= __('Round Off') %>:</div>
+                        <div class="col-6 text-end"><span id="roundOffDisplay">₹0.00</span></div>
+                        <input type="hidden" name="round_off" id="round_off_input" value="0.00">
+                    </div>
+                    <hr>
+                    <div class="row mb-1">
+                        <div class="col-6 fs-5 fw-bold text-primary"><%= __('Grand Total') %>:</div>
+                        <div class="col-6 text-end fs-5 fw-bold text-primary"><span id="grandTotalDisplay">₹0.00</span></div>
+                        <input type="hidden" name="grand_total" id="grand_total_input" value="0.00">
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Action buttons -->
+    <div class="mt-3 text-end border-top pt-3">
+        <a href="/sales/bill" class="btn btn-secondary me-2"><%= __('Cancel') %></a>
+        <button type="submit" name="status" value="Draft" class="btn btn-outline-primary me-2">
+            <i class="fa-solid fa-file-signature me-1"></i><%= __('Save Draft') %>
+        </button>
+        <button type="submit" name="status" value="Final" class="btn btn-primary">
+            <i class="fa-solid fa-print me-1"></i><%= __('Save & Print') %>
+        </button>
+    </div>
+</form>
+
+<!-- Products array for client search/rates lookup -->
+<script>
+    const productsData = <%- JSON.stringify(products) %>;
+    const initialItems = <%- isEdit ? JSON.stringify(items) : '[]' %>;
+</script>
+
+<script>
+    document.addEventListener("DOMContentLoaded", function() {
+        let rowId = 0;
+
+        // Auto invoice generation trigger
+        $('#invoiceType, #company_id').on('change', function() {
+            const type = $('#invoiceType').val();
+            const companyId = $('#company_id').val();
+            
+            // Adjust invoice prefix/no if not editing
+            <% if (!isEdit) { %>
+            $.get(`/api/next-invoice-number?type=${type}&company_id=${companyId}`, function(data) {
+                $('#invoice_no').val(data.number);
+            });
+            <% } %>
+
+            // Update Company state code if company selection changes
+            const selectedComp = $('#company_id').find(':selected');
+            if (selectedComp.length) {
+                const companyGst = selectedComp.data('gstin') || '';
+                $('#companyGstDisplay').text(companyGst);
+                const prefix = companyGst.substring(0, 2);
+                $('#companyStateDisplay').text(prefix);
+                $('#company_state_code').val(prefix);
+                recalcAllTaxes();
+            }
+        });
+
+        // Watch Party changes to load Address, GST, State codes, and determine Tax mode
+        $('#party_id').on('change', function() {
+            const partyId = $(this).val();
+            if (!partyId) {
+                clearPartyDetails();
+                return;
+            }
+
+            $.get(`/api/party/${partyId}`, function(party) {
+                $('#party_gstin').val(party.gstin || 'N/A');
+                $('#party_state').val(`${party.state || ''} (${party.state_code || ''})`);
+                $('#party_address').val(party.address || '');
+                $('#party_shipping').val(party.shipping_address || '');
+
+                // Set Tax Mode: intra-state (same code) vs inter-state (different code)
+                const companyState = $('#company_state_code').val();
+                const partyState = party.state_code || '';
+                
+                if (partyState === companyState || !partyState) {
+                    $('#tax_mode').val('intra');
+                    $('#cgstRow').removeClass('d-none');
+                    $('#sgstRow').removeClass('d-none');
+                    $('#igstRow').addClass('d-none');
+                } else {
+                    $('#tax_mode').val('inter');
+                    $('#cgstRow').addClass('d-none');
+                    $('#sgstRow').addClass('d-none');
+                    $('#igstRow').removeClass('d-none');
+                }
+
+                recalcAllTaxes();
+            });
+        });
+
+        function clearPartyDetails() {
+            $('#party_gstin').val('');
+            $('#party_state').val('');
+            $('#party_address').val('');
+            $('#party_shipping').val('');
+            $('#tax_mode').val('intra');
+        }
+
+        // Add item row helper
+        function addProductRow(itemData = null) {
+            rowId++;
+            let options = '<option value="">-- Choose Product --</option>';
+            productsData.forEach(p => {
+                const selected = itemData && itemData.product_id == p.id ? 'selected' : '';
+                options += `<option value="${p.id}" ${selected}>${p.name}</option>`;
+            });
+
+            const tr = `
+                <tr id="row_${rowId}" class="product-row">
+                    <td>
+                        <select name="items[${rowId}][product_id]" class="form-select item-product select2-dyn" required>
+                            ${options}
+                        </select>
+                    </td>
+                    <td>
+                        <input type="number" name="items[${rowId}][bags]" class="form-control item-bags" value="${itemData ? itemData.bags : '0'}" min="0">
+                    </td>
+                    <td>
+                        <input type="number" step="0.01" name="items[${rowId}][quantity]" class="form-control item-qty" value="${itemData ? itemData.quantity : '0.00'}" required min="0.01">
+                    </td>
+                    <td>
+                        <input type="text" name="items[${rowId}][unit]" class="form-control item-unit bg-light" readonly value="${itemData ? itemData.unit : ''}">
+                    </td>
+                    <td>
+                        <input type="number" step="0.01" name="items[${rowId}][rate]" class="form-control item-rate" value="${itemData ? itemData.rate : '0.00'}" required min="0.01">
+                    </td>
+                    <td>
+                        <input type="number" step="0.01" name="items[${rowId}][amount]" class="form-control item-amount bg-light" readonly value="${itemData ? itemData.amount : '0.00'}">
+                    </td>
+                    <td>
+                        <span class="badge bg-secondary item-tax-badge">${itemData ? (itemData.cgst_percent + itemData.sgst_percent + itemData.igst_percent) : 0}%</span>
+                        <input type="hidden" class="item-tax-percent" value="${itemData ? (itemData.cgst_percent + itemData.sgst_percent + itemData.igst_percent) : 0}">
+                        <!-- Outputs for server submit -->
+                        <input type="hidden" name="items[${rowId}][cgst_percent]" class="out-cgst-p" value="${itemData ? itemData.cgst_percent : 0}">
+                        <input type="hidden" name="items[${rowId}][cgst_amount]" class="out-cgst-a" value="${itemData ? itemData.cgst_amount : 0}">
+                        <input type="hidden" name="items[${rowId}][sgst_percent]" class="out-sgst-p" value="${itemData ? itemData.sgst_percent : 0}">
+                        <input type="hidden" name="items[${rowId}][sgst_amount]" class="out-sgst-a" value="${itemData ? itemData.sgst_amount : 0}">
+                        <input type="hidden" name="items[${rowId}][igst_percent]" class="out-igst-p" value="${itemData ? itemData.igst_percent : 0}">
+                        <input type="hidden" name="items[${rowId}][igst_amount]" class="out-igst-a" value="${itemData ? itemData.igst_amount : 0}">
+                    </td>
+                    <td>
+                        <input type="number" step="0.01" name="items[${rowId}][total]" class="form-control item-total bg-light" readonly value="${itemData ? itemData.total : '0.00'}">
+                    </td>
+                    <td class="text-center no-print">
+                        <button type="button" class="btn btn-sm btn-outline-danger remove-row-btn">
+                            <i class="fa-solid fa-trash"></i>
+                        </button>
+                    </td>
+                </tr>
+            `;
+
+            $('#productTableBody').append(tr);
+
+            // Init Select2 on the new row dropdown
+            $(`#row_${rowId} .select2-dyn`).select2({
+                width: '100%'
+            });
+
+            // Auto-fill product rate and tax on change
+            $(`#row_${rowId} .item-product`).on('change', function() {
+                const prodId = $(this).val();
+                const row = $(this).closest('tr');
+                if (!prodId) {
+                    row.find('.item-unit').val('');
+                    row.find('.item-rate').val('0.00');
+                    row.find('.item-tax-badge').text('0%');
+                    row.find('.item-tax-percent').val(0);
+                    calculateRow(row);
+                    return;
+                }
+
+                // Query API or look up local details
+                const prod = productsData.find(p => p.id == prodId);
+                if (prod) {
+                    row.find('.item-unit').val(prod.unit_name);
+                    row.find('.item-rate').val(prod.sale_rate.toFixed(2));
+                    row.find('.item-tax-badge').text(prod.tax_rate + '%');
+                    row.find('.item-tax-percent').val(prod.tax_rate);
+                    calculateRow(row);
+                }
+            });
+        }
+
+        // Add initial or empty row
+        $('#addRowBtn').click(function() {
+            addProductRow();
+        });
+
+        // Remove row handler
+        $(document).on('click', '.remove-row-btn', function() {
+            $(this).closest('tr').remove();
+            calculateInvoice();
+        });
+
+        // Recalculations on inputs
+        $(document).on('input', '.item-qty, .item-rate, .item-bags', function() {
+            const row = $(this).closest('tr');
+            calculateRow(row);
+        });
+
+        function calculateRow(row) {
+            const qty = parseFloat(row.find('.item-qty').val()) || 0;
+            const rate = parseFloat(row.find('.item-rate').val()) || 0;
+            const taxPercent = parseFloat(row.find('.item-tax-percent').val()) || 0;
+            const mode = $('#tax_mode').val();
+
+            const amount = qty * rate;
+            row.find('.item-amount').val(amount.toFixed(2));
+
+            let cgstP = 0, cgstA = 0, sgstP = 0, sgstA = 0, igstP = 0, igstA = 0;
+
+            if (mode === 'intra') {
+                cgstP = taxPercent / 2;
+                sgstP = taxPercent / 2;
+                cgstA = amount * (cgstP / 100);
+                sgstA = amount * (sgstP / 100);
+            } else {
+                igstP = taxPercent;
+                igstA = amount * (igstP / 100);
+            }
+
+            // Set hidden inputs
+            row.find('.out-cgst-p').val(cgstP);
+            row.find('.out-cgst-a').val(cgstA);
+            row.find('.out-sgst-p').val(sgstP);
+            row.find('.out-sgst-a').val(sgstA);
+            row.find('.out-igst-p').val(igstP);
+            row.find('.out-igst-a').val(igstA);
+
+            const total = amount + cgstA + sgstA + igstA;
+            row.find('.item-total').val(total.toFixed(2));
+
+            calculateInvoice();
+        }
+
+        function recalcAllTaxes() {
+            $('.product-row').each(function() {
+                calculateRow($(this));
+            });
+        }
+
+        function calculateInvoice() {
+            let subTotal = 0;
+            let cgstTotal = 0;
+            let sgstTotal = 0;
+            let igstTotal = 0;
+
+            $('.product-row').each(function() {
+                const amt = parseFloat($(this).find('.item-amount').val()) || 0;
+                const cgst = parseFloat($(this).find('.out-cgst-a').val()) || 0;
+                const sgst = parseFloat($(this).find('.out-sgst-a').val()) || 0;
+                const igst = parseFloat($(this).find('.out-igst-a').val()) || 0;
+
+                subTotal += amt;
+                cgstTotal += cgst;
+                sgstTotal += sgst;
+                igstTotal += igst;
+            });
+
+            const taxTotal = cgstTotal + sgstTotal + igstTotal;
+            const rawGrandTotal = subTotal + taxTotal;
+            const roundedGrandTotal = Math.round(rawGrandTotal);
+            const roundOff = roundedGrandTotal - rawGrandTotal;
+
+            // Update displays
+            $('#subTotalDisplay').text('₹' + subTotal.toFixed(2));
+            $('#cgstTotalDisplay').text('₹' + cgstTotal.toFixed(2));
+            $('#sgstTotalDisplay').text('₹' + sgstTotal.toFixed(2));
+            $('#igstTotalDisplay').text('₹' + igstTotal.toFixed(2));
+            $('#taxTotalDisplay').text('₹' + taxTotal.toFixed(2));
+            $('#roundOffDisplay').text('₹' + roundOff.toFixed(2));
+            $('#grandTotalDisplay').text('₹' + roundedGrandTotal.toFixed(2));
+
+            // Update hidden form fields
+            $('#sub_total_input').val(subTotal.toFixed(2));
+            $('#tax_total_input').val(taxTotal.toFixed(2));
+            $('#round_off_input').val(roundOff.toFixed(2));
+            $('#grand_total_input').val(roundedGrandTotal.toFixed(2));
+        }
+
+        // If editing, load original items, otherwise add an empty row
+        if (initialItems.length > 0) {
+            initialItems.forEach(item => {
+                addProductRow(item);
+            });
+            // Trigger party change to load address details & trigger calculations
+            $('#party_id').trigger('change');
+        } else {
+            addProductRow();
+        }
+    });
+</script>
+
+<%- include('../layouts/footer') %>

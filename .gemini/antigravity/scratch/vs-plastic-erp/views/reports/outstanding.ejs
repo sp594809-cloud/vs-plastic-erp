@@ -1,0 +1,128 @@
+<%- include('../layouts/header') %>
+<%- include('../layouts/sidebar') %>
+
+<div class="row mb-3 align-items-center">
+    <div class="col-sm-6">
+        <h1 class="m-0 text-dark">Outstanding Balances Report</h1>
+    </div>
+    <div class="col-sm-6 text-end">
+        <a href="/reports" class="btn btn-outline-secondary">
+            <i class="fa-solid fa-arrow-left me-1"></i>Back to Reports
+        </a>
+    </div>
+</div>
+
+<!-- Summaries Cards -->
+<div class="row mb-3">
+    <div class="col-md-6 mb-3">
+        <div class="card bg-success text-white">
+            <div class="card-body">
+                <h6>Total Outstanding Receivables (Dr)</h6>
+                <h3>₹<%= totalReceivables.toFixed(2) %></h3>
+                <small>Total amount to collect from Customers</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6 mb-3">
+        <div class="card bg-danger text-white">
+            <div class="card-body">
+                <h6>Total Outstanding Payables (Cr)</h6>
+                <h3>₹<%= totalPayables.toFixed(2) %></h3>
+                <small>Total amount to pay to Suppliers</small>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header bg-light">A/C Outstanding Balances List</div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table id="outstandingTable" class="table table-bordered table-striped table-hover align-middle">
+                <thead>
+                    <tr>
+                        <th>Party Name</th>
+                        <th>Type</th>
+                        <th>Mobile</th>
+                        <th>Contact Person</th>
+                        <th class="text-end">Receivable (Dr - Debit)</th>
+                        <th class="text-end">Payable (Cr - Credit)</th>
+                        <th class="text-center no-print">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <% parties.forEach(party => { %>
+                        <% if (party.current_balance !== 0) { %>
+                            <tr>
+                                <td class="fw-bold"><%= party.name %></td>
+                                <td>
+                                    <% if (party.type === 'Customer') { %>
+                                        <span class="badge bg-success">Customer</span>
+                                    <% } else if (party.type === 'Supplier') { %>
+                                        <span class="badge bg-danger">Supplier</span>
+                                    <% } else { %>
+                                        <span class="badge bg-warning text-dark">Both</span>
+                                    <% } %>
+                                </td>
+                                <td><%= party.mobile || '-' %></td>
+                                <td><%= party.contact_person || '-' %></td>
+                                <td class="text-end text-success fw-bold">
+                                    <%= party.current_balance > 0 ? '₹' + party.current_balance.toFixed(2) : '-' %>
+                                </td>
+                                <td class="text-end text-danger fw-bold">
+                                    <%= party.current_balance < 0 ? '₹' + Math.abs(party.current_balance).toFixed(2) : '-' %>
+                                </td>
+                                <td class="text-center no-print">
+                                    <a href="/reports/party-ledger?party_id=<%= party.id %>" class="btn btn-sm btn-outline-primary" title="View Statement">
+                                        <i class="fa-solid fa-address-book"></i> Statement
+                                    </a>
+                                </td>
+                            </tr>
+                        <% } %>
+                    <% }) %>
+                </tbody>
+                <tfoot class="table-light fw-bold">
+                    <tr>
+                        <td colspan="4" class="text-center">Total Net Outstanding</td>
+                        <td class="text-end text-success">₹<%= totalReceivables.toFixed(2) %></td>
+                        <td class="text-end text-danger">₹<%= totalPayables.toFixed(2) %></td>
+                        <td></td>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+    window.addEventListener('DOMContentLoaded', () => {
+        $('#outstandingTable').DataTable({
+            language: window.dtLanguageConfig,
+            dom: 'Bfrtip',
+            buttons: [
+                {
+                    extend: 'excelHtml5',
+                    text: '<i class="fa-solid fa-file-excel me-1"></i> Excel',
+                    className: 'btn btn-success btn-sm',
+                    footer: true
+                },
+                {
+                    extend: 'pdfHtml5',
+                    text: '<i class="fa-solid fa-file-pdf me-1"></i> PDF',
+                    className: 'btn btn-danger btn-sm',
+                    footer: true
+                },
+                {
+                    extend: 'print',
+                    text: '<i class="fa-solid fa-print me-1"></i> Print',
+                    className: 'btn btn-dark btn-sm',
+                    footer: true
+                }
+            ],
+            pageLength: 25,
+            order: [[0, 'asc']]
+        });
+    });
+</script>
+
+<%- include('../layouts/footer') %>

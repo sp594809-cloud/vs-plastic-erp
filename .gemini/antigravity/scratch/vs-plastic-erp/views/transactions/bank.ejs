@@ -1,0 +1,110 @@
+<%- include('../layouts/header') %>
+<%- include('../layouts/sidebar') %>
+
+<div class="row mb-3 align-items-center">
+    <div class="col-sm-6">
+        <h1 class="m-0 text-dark"><%= __('Bank Records') %> (Bank Book)</h1>
+    </div>
+    <div class="col-sm-6 text-end">
+        <form action="/transactions/bank" method="GET" class="d-inline-block">
+            <select name="bank_id" id="bankFilter" class="form-select select2" onchange="this.form.submit()">
+                <% banks.forEach(bk => { %>
+                    <option value="<%= bk.id %>" <%= activeBank.id === bk.id ? 'selected' : '' %>><%= bk.name %> (A/C: ...<%= bk.ac_no.slice(-4) %>)</option>
+                <% }) %>
+            </select>
+        </form>
+    </div>
+</div>
+
+<!-- Bank Summary Card -->
+<div class="card mb-4 bg-light">
+    <div class="card-body">
+        <div class="row align-items-center">
+            <div class="col-md-6 border-end">
+                <h4 class="fw-bold text-primary"><%= activeBank.name %></h4>
+                <p class="mb-0 text-muted">
+                    <strong>A/C No:</strong> <%= activeBank.ac_no %> | <strong>IFSC:</strong> <%= activeBank.ifsc %><br>
+                    <strong>Branch:</strong> <%= activeBank.branch %>
+                </p>
+            </div>
+            <div class="col-md-3 text-center border-end">
+                <h6 class="text-muted mb-1">Opening Balance</h6>
+                <h4 class="fw-bold text-secondary">₹<%= activeBank.opening_balance.toFixed(2) %></h4>
+            </div>
+            <div class="col-md-3 text-center">
+                <h6 class="text-muted mb-1">Current Ledger Balance</h6>
+                <h4 class="fw-bold text-success">₹<%= activeBank.current_balance.toFixed(2) %></h4>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header bg-light">Bank Statement Ledger Ledger</div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table id="bankTable" class="table table-bordered table-striped align-middle">
+                <thead>
+                    <tr>
+                        <th><%= __('Date') %></th>
+                        <th>Description</th>
+                        <th><%= __('Party Name') %></th>
+                        <th><%= __('Reference No') %></th>
+                        <th class="text-end">Deposit (+)</th>
+                        <th class="text-end">Withdrawal (-)</th>
+                        <th class="text-end">Running Balance</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <% let balance = activeBank.opening_balance; %>
+                    <% transactions.forEach(tx => { %>
+                        <% if (tx.type === 'Deposit') { balance += tx.amount; } else { balance -= tx.amount; } %>
+                        <tr>
+                            <td><%= new Date(tx.date).toLocaleDateString('en-GB') %></td>
+                            <td><%= tx.description || 'Bank ledger entry' %></td>
+                            <td class="fw-bold"><%= tx.party_name || '-' %></td>
+                            <td><%= tx.reference_no || '-' %></td>
+                            <td class="text-end text-success fw-bold">
+                                <%= tx.type === 'Deposit' ? '₹' + tx.amount.toFixed(2) : '-' %>
+                            </td>
+                            <td class="text-end text-danger fw-bold">
+                                <%= tx.type === 'Withdrawal' ? '₹' + tx.amount.toFixed(2) : '-' %>
+                            </td>
+                            <td class="text-end fw-bold">₹<%= balance.toFixed(2) %></td>
+                        </tr>
+                    <% }) %>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+    window.addEventListener('DOMContentLoaded', () => {
+        $('#bankTable').DataTable({
+            language: window.dtLanguageConfig,
+            dom: 'Bfrtip',
+            buttons: [
+                {
+                    extend: 'excelHtml5',
+                    text: '<i class="fa-solid fa-file-excel me-1"></i> Excel',
+                    className: 'btn btn-success btn-sm'
+                },
+                {
+                    extend: 'pdfHtml5',
+                    text: '<i class="fa-solid fa-file-pdf me-1"></i> PDF',
+                    className: 'btn btn-danger btn-sm'
+                },
+                {
+                    extend: 'print',
+                    text: '<i class="fa-solid fa-print me-1"></i> Print',
+                    className: 'btn btn-dark btn-sm'
+                }
+            ],
+            pageLength: 25,
+            order: [[0, 'asc']]
+        });
+    });
+</script>
+
+<%- include('../layouts/footer') %>

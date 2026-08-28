@@ -1,0 +1,209 @@
+<%- include('../layouts/header') %>
+<%- include('../layouts/sidebar') %>
+
+<div class="row mb-3 align-items-center">
+    <div class="col-sm-6">
+        <h1 class="m-0 text-dark">GST Summary Report (GSTR-1 & GSTR-2 Style)</h1>
+    </div>
+    <div class="col-sm-6 text-end">
+        <a href="/reports" class="btn btn-outline-secondary">
+            <i class="fa-solid fa-arrow-left me-1"></i>Back to Reports
+        </a>
+    </div>
+</div>
+
+<!-- Date Filter Card -->
+<div class="card mb-4 no-print">
+    <div class="card-header bg-light">Select Filing Period</div>
+    <div class="card-body">
+        <form action="/reports/gst-summary" method="GET">
+            <div class="row">
+                <div class="col-md-4 mb-3">
+                    <label class="form-label">Filing Start Date</label>
+                    <input type="date" name="start_date" class="form-control" value="<%= filters.start_date %>">
+                </div>
+                <div class="col-md-4 mb-3">
+                    <label class="form-label">Filing End Date</label>
+                    <input type="date" name="end_date" class="form-control" value="<%= filters.end_date %>">
+                </div>
+                <div class="col-md-4 mb-3 d-flex align-items-end">
+                    <button type="submit" class="btn btn-primary w-100 me-2">
+                        <i class="fa-solid fa-circle-notch me-1"></i>Calculate GST
+                    </button>
+                    <a href="/reports/gst-summary" class="btn btn-outline-secondary">Reset</a>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Tax Summaries Info Cards -->
+<div class="row mb-3">
+    <!-- Output Tax Liability (Sales) -->
+    <div class="col-md-6 mb-3">
+        <div class="card border-primary">
+            <div class="card-header bg-primary text-white">Outward Tax Summary (Sales - GSTR-1)</div>
+            <div class="card-body">
+                <div class="row text-center">
+                    <div class="col-6 border-end">
+                        <h6 class="text-muted">Taxable Value</h6>
+                        <h4 class="fw-bold">₹<%= outwardTotals.taxable.toFixed(2) %></h4>
+                    </div>
+                    <div class="col-6">
+                        <h6 class="text-muted">GST Collected</h6>
+                        <h4 class="fw-bold text-primary">₹<%= outwardTotals.gst.toFixed(2) %></h4>
+                    </div>
+                </div>
+                <hr>
+                <div class="row text-center text-muted" style="font-size: 0.85rem;">
+                    <div class="col-4 border-end">CGST: ₹<%= outwardTotals.cgst.toFixed(2) %></div>
+                    <div class="col-4 border-end">SGST: ₹<%= outwardTotals.sgst.toFixed(2) %></div>
+                    <div class="col-4">IGST: ₹<%= outwardTotals.igst.toFixed(2) %></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Input Tax Credit (Purchases) -->
+    <div class="col-md-6 mb-3">
+        <div class="card border-success">
+            <div class="card-header bg-success text-white">Inward Tax Summary (Purchases - GSTR-2)</div>
+            <div class="card-body">
+                <div class="row text-center">
+                    <div class="col-6 border-end">
+                        <h6 class="text-muted">Taxable Value</h6>
+                        <h4 class="fw-bold">₹<%= inwardTotals.taxable.toFixed(2) %></h4>
+                    </div>
+                    <div class="col-6">
+                        <h6 class="text-muted">GST Paid (ITC)</h6>
+                        <h4 class="fw-bold text-success">₹<%= inwardTotals.gst.toFixed(2) %></h4>
+                    </div>
+                </div>
+                <hr>
+                <div class="row text-center text-muted" style="font-size: 0.85rem;">
+                    <div class="col-4 border-end">CGST: ₹<%= inwardTotals.cgst.toFixed(2) %></div>
+                    <div class="col-4 border-end">SGST: ₹<%= inwardTotals.sgst.toFixed(2) %></div>
+                    <div class="col-4">IGST: ₹<%= inwardTotals.igst.toFixed(2) %></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Details Registers Cards -->
+<div class="card mb-4">
+    <div class="card-header bg-light">GSTR-1 Outward Supplies (Sales) Register Details</div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-bordered table-striped align-middle gst-tables">
+                <thead>
+                    <tr>
+                        <th>Invoice No</th>
+                        <th>Date</th>
+                        <th>Party Name</th>
+                        <th>Party GSTIN</th>
+                        <th class="text-end">Taxable Value</th>
+                        <th class="text-end">CGST</th>
+                        <th class="text-end">SGST</th>
+                        <th class="text-end">IGST</th>
+                        <th class="text-end">Total GST</th>
+                        <th class="text-end">Invoice Value</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <% if (outwardItems.length === 0) { %>
+                        <tr><td colspan="10" class="text-center text-muted p-3">No sales transactions in this period</td></tr>
+                    <% } else { %>
+                        <% outwardItems.forEach(it => { %>
+                            <tr>
+                                <td><%= it.invoice_no %></td>
+                                <td><%= new Date(it.date).toLocaleDateString('en-GB') %></td>
+                                <td class="fw-bold"><%= it.party_name %></td>
+                                <td><%= it.party_gstin || 'Unregistered' %></td>
+                                <td class="text-end">₹<%= it.taxable_value.toFixed(2) %></td>
+                                <td class="text-end">₹<%= it.cgst_amount.toFixed(2) %></td>
+                                <td class="text-end">₹<%= it.sgst_amount.toFixed(2) %></td>
+                                <td class="text-end">₹<%= it.igst_amount.toFixed(2) %></td>
+                                <td class="text-end fw-bold text-primary">₹<%= (it.cgst_amount + it.sgst_amount + it.igst_amount).toFixed(2) %></td>
+                                <td class="text-end fw-bold">₹<%= it.grand_total.toFixed(2) %></td>
+                            </tr>
+                        <% }) %>
+                    <% } %>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<div class="card mb-4">
+    <div class="card-header bg-light">GSTR-2 Inward Supplies (Purchases) Register Details</div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-bordered table-striped align-middle gst-tables">
+                <thead>
+                    <tr>
+                        <th>Bill No.</th>
+                        <th>Date</th>
+                        <th>Supplier Name</th>
+                        <th>Supplier GSTIN</th>
+                        <th class="text-end">Taxable Value</th>
+                        <th class="text-end">CGST</th>
+                        <th class="text-end">SGST</th>
+                        <th class="text-end">IGST</th>
+                        <th class="text-end">Total GST</th>
+                        <th class="text-end">Invoice Value</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <% if (inwardItems.length === 0) { %>
+                        <tr><td colspan="10" class="text-center text-muted p-3">No purchase transactions in this period</td></tr>
+                    <% } else { %>
+                        <% inwardItems.forEach(it => { %>
+                            <tr>
+                                <td><%= it.invoice_no %></td>
+                                <td><%= new Date(it.date).toLocaleDateString('en-GB') %></td>
+                                <td class="fw-bold"><%= it.party_name %></td>
+                                <td><%= it.party_gstin || 'Unregistered' %></td>
+                                <td class="text-end">₹<%= it.taxable_value.toFixed(2) %></td>
+                                <td class="text-end">₹<%= it.cgst_amount.toFixed(2) %></td>
+                                <td class="text-end">₹<%= it.sgst_amount.toFixed(2) %></td>
+                                <td class="text-end">₹<%= it.igst_amount.toFixed(2) %></td>
+                                <td class="text-end fw-bold text-success">₹<%= (it.cgst_amount + it.sgst_amount + it.igst_amount).toFixed(2) %></td>
+                                <td class="text-end fw-bold">₹<%= it.grand_total.toFixed(2) %></td>
+                            </tr>
+                        <% }) %>
+                    <% } %>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+    window.addEventListener('DOMContentLoaded', () => {
+        $('.gst-tables').DataTable({
+            language: window.dtLanguageConfig,
+            dom: 'Bfrtip',
+            buttons: [
+                {
+                    extend: 'excelHtml5',
+                    text: '<i class="fa-solid fa-file-excel me-1"></i> Excel',
+                    className: 'btn btn-success btn-sm'
+                },
+                {
+                    extend: 'pdfHtml5',
+                    text: '<i class="fa-solid fa-file-pdf me-1"></i> PDF',
+                    className: 'btn btn-danger btn-sm'
+                },
+                {
+                    extend: 'print',
+                    text: '<i class="fa-solid fa-print me-1"></i> Print',
+                    className: 'btn btn-dark btn-sm'
+                }
+            ],
+            pageLength: 10
+        });
+    });
+</script>
+
+<%- include('../layouts/footer') %>

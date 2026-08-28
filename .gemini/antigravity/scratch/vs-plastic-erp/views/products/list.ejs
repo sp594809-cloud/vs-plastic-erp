@@ -1,0 +1,95 @@
+<%- include('../layouts/header') %>
+<%- include('../layouts/sidebar') %>
+
+<div class="row mb-3 align-items-center">
+    <div class="col-sm-6">
+        <h1 class="m-0 text-dark"><%= __('Product List') %></h1>
+    </div>
+    <div class="col-sm-6 text-end">
+        <a href="/master/products/add" class="btn btn-primary">
+            <i class="fa-solid fa-plus me-1"></i><%= __('Add Product') %>
+        </a>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-body">
+        <div class="table-responsive">
+            <table id="productsTable" class="table table-bordered table-striped table-hover align-middle">
+                <thead>
+                    <tr>
+                        <th><%= __('Product Name') %></th>
+                        <th><%= __('HSN/SAC Code') %></th>
+                        <th><%= __('Unit') %></th>
+                        <th class="text-end"><%= __('Purchase Rate') %></th>
+                        <th class="text-end"><%= __('Sale Rate') %></th>
+                        <th class="text-center"><%= __('Tax Percentage') %></th>
+                        <th class="text-end"><%= __('Opening Stock') %></th>
+                        <th class="text-end"><%= __('Current Stock') %></th>
+                        <th class="text-center no-print"><%= __('Actions') %></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <% products.forEach(prod => { %>
+                        <tr>
+                            <td class="fw-bold"><%= prod.name %></td>
+                            <td><%= prod.hsn_sac || '-' %></td>
+                            <td><%= prod.unit_name %></td>
+                            <td class="text-end">₹<%= prod.purchase_rate.toFixed(2) %></td>
+                            <td class="text-end">₹<%= prod.sale_rate.toFixed(2) %></td>
+                            <td class="text-center"><span class="badge bg-secondary"><%= prod.tax_rate %>%</span></td>
+                            <td class="text-end"><%= prod.opening_stock %> <%= prod.unit_name %></td>
+                            <td class="text-end fw-bold">
+                                <span class="<%= prod.current_stock > 10 ? 'text-success' : 'text-danger' %>">
+                                    <%= prod.current_stock %> <%= prod.unit_name %>
+                                </span>
+                            </td>
+                            <td class="text-center no-print">
+                                <a href="/master/products/edit/<%= prod.id %>" class="btn btn-sm btn-info text-white me-1" title="<%= __('Edit') %>">
+                                    <i class="fa-solid fa-pen-to-square"></i>
+                                </a>
+                                <a href="/master/products/delete/<%= prod.id %>" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure you want to delete this product?');" title="<%= __('Delete') %>">
+                                    <i class="fa-solid fa-trash"></i>
+                                </a>
+                            </td>
+                        </tr>
+                    <% }) %>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Initialize DataTable with CSV/Excel/PDF/Print buttons -->
+<script>
+    window.addEventListener('DOMContentLoaded', () => {
+        $('#productsTable').DataTable({
+            language: window.dtLanguageConfig,
+            dom: 'Bfrtip',
+            buttons: [
+                {
+                    extend: 'excelHtml5',
+                    text: '<i class="fa-solid fa-file-excel me-1"></i> Excel',
+                    className: 'btn btn-success btn-sm',
+                    exportOptions: { columns: [0, 1, 2, 3, 4, 5, 6, 7] }
+                },
+                {
+                    extend: 'pdfHtml5',
+                    text: '<i class="fa-solid fa-file-pdf me-1"></i> PDF',
+                    className: 'btn btn-danger btn-sm',
+                    exportOptions: { columns: [0, 1, 2, 3, 4, 5, 6, 7] }
+                },
+                {
+                    extend: 'print',
+                    text: '<i class="fa-solid fa-print me-1"></i> Print',
+                    className: 'btn btn-dark btn-sm',
+                    exportOptions: { columns: [0, 1, 2, 3, 4, 5, 6, 7] }
+                }
+            ],
+            pageLength: 10,
+            order: [[0, 'asc']]
+        });
+    });
+</script>
+
+<%- include('../layouts/footer') %>

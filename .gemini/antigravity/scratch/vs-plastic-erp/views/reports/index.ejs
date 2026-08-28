@@ -1,0 +1,72 @@
+<%- include('../layouts/header') %>
+<%- include('../layouts/sidebar') %>
+
+<div class="row mb-3">
+    <div class="col-sm-12">
+        <h1 class="m-0 text-dark">Business Reports Centre</h1>
+    </div>
+</div>
+
+<div class="row">
+    <!-- Sales Register Card -->
+    <div class="col-md-4 mb-4">
+        <div class="card h-100 shadow-sm border-0">
+            <div class="card-body text-center p-4">
+                <i class="fa-solid fa-file-invoice-dollar fs-1 text-primary mb-3"></i>
+                <h5 class="fw-bold">Sales Register</h5>
+                <p class="text-muted small">List and filter all sales invoices, tax structures, and totals by date, company, or party.</p>
+                <a href="/reports/sales-register" class="btn btn-outline-primary w-100">View Sales Register</a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Purchase Register Card -->
+    <div class="col-md-4 mb-4">
+        <div class="card h-100 shadow-sm border-0">
+            <div class="card-body text-center p-4">
+                <i class="fa-solid fa-file-invoice fs-1 text-success mb-3"></i>
+                <h5 class="fw-bold">Purchase Register</h5>
+                <p class="text-muted small">Analyze inventory purchases, supplier tax invoices, and cost totals by date range.</p>
+                <a href="/reports/purchase-register" class="btn btn-outline-success w-100">View Purchase Register</a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Party Ledger Card -->
+    <div class="col-md-4 mb-4">
+        <div class="card h-100 shadow-sm border-0">
+            <div class="card-body text-center p-4">
+                <i class="fa-solid fa-address-book fs-1 text-warning mb-3"></i>
+                <h5 class="fw-bold">Party Ledger Account</h5>
+                <p class="text-muted small">Generate itemized statement of accounts for customers or suppliers showing debits/credits.</p>
+                <a href="/reports/party-ledger" class="btn btn-outline-warning w-100">View Party Ledger</a>
+            </div>
+        </div>
+    </div>
+
+    <!-- GST Report Card -->
+    <div class="col-md-4 mb-4">
+        <div class="card h-100 shadow-sm border-0">
+            <div class="card-body text-center p-4">
+                <i class="fa-solid fa-calculator fs-1 text-danger mb-3"></i>
+                <h5 class="fw-bold">GST Summary Report</h5>
+                <p class="text-muted small">Summary of GSTR-1 & GSTR-2 sales and purchase taxes (taxable value, CGST, SGST, IGST).</p>
+                <a href="/reports/gst-summary" class="btn btn-outline-danger w-100">View GST Summary</a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Outstanding Card -->
+    <div class="col-md-4 mb-4">
+        <div class="card h-100 shadow-sm border-0">
+            <div class="card-body text-center p-4">
+                <i class="fa-solid fa-scale-unbalanced-flip fs-1 text-info mb-3"></i>
+                <h5 class="fw-bold">Outstanding Balances</h5>
+                <p class="text-muted small">Summary of aging outstanding receivables (customers) and payables (suppliers).</p>
+                <a href="/reports/outstanding" class="btn btn-outline-info w-100">View Outstanding Reports</a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<%- include('../layouts/footer') %>

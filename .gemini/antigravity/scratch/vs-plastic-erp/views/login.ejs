@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - VS Plastic ERP</title>
+    
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Bootstrap 5 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Custom CSS -->
+    <style>
+        :root {
+            --primary-navy: #1a252f;
+            --secondary-bg: #2c3e50;
+            --accent-color: #3498db;
+            --font-outfit: 'Outfit', sans-serif;
+        }
+
+        body {
+            font-family: var(--font-outfit);
+            background: linear-gradient(135deg, var(--primary-navy) 0%, var(--secondary-bg) 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0;
+        }
+
+        .login-card {
+            border: none;
+            border-radius: 16px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            width: 100%;
+            max-width: 400px;
+            overflow: hidden;
+            transition: all 0.3s ease;
+        }
+
+        .login-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.35);
+        }
+
+        .card-header-brand {
+            background-color: var(--primary-navy);
+            color: #ffffff;
+            padding: 30px 20px;
+            text-align: center;
+            border-bottom: 3px solid var(--accent-color);
+        }
+
+        .card-header-brand h2 {
+            font-weight: 700;
+            margin: 0;
+            letter-spacing: 1px;
+        }
+
+        .card-header-brand p {
+            margin: 5px 0 0 0;
+            font-size: 0.9rem;
+            color: rgba(255, 255, 255, 0.7);
+        }
+
+        .card-body {
+            padding: 40px 30px;
+        }
+
+        .form-control {
+            height: 48px;
+            border-radius: 8px;
+            border: 1px solid #ced4da;
+            padding-left: 40px;
+        }
+
+        .form-control:focus {
+            border-color: var(--accent-color);
+            box-shadow: 0 0 0 0.25rem rgba(52, 152, 219, 0.25);
+        }
+
+        .form-group-relative {
+            position: relative;
+            margin-bottom: 20px;
+        }
+
+        .form-group-relative i {
+            position: absolute;
+            left: 15px;
+            top: 16px;
+            color: #6c757d;
+        }
+
+        .btn-login {
+            background-color: var(--accent-color);
+            border: none;
+            color: #ffffff;
+            height: 48px;
+            border-radius: 8px;
+            font-weight: 600;
+            transition: all 0.2s ease;
+            width: 100%;
+        }
+
+        .btn-login:hover {
+            background-color: #2980b9;
+            box-shadow: 0 4px 10px rgba(52, 152, 219, 0.4);
+        }
+
+        .alert {
+            border-radius: 8px;
+            font-size: 0.9rem;
+            padding: 12px;
+        }
+    </style>
+</head>
+<body>
+
+<div class="login-card">
+    <div class="card-header-brand">
+        <h2>VS PLASTIC</h2>
+        <p>ERP & Billing System</p>
+    </div>
+    
+    <div class="card-body">
+        <% if (typeof error_msg !== 'undefined' && error_msg) { %>
+            <div class="alert alert-danger d-flex align-items-center" role="alert">
+                <i class="fa-solid fa-circle-exclamation me-2"></i>
+                <div><%= error_msg %></div>
+            </div>
+        <% } %>
+        
+        <form action="/login" method="POST">
+            <!-- Username Input -->
+            <div class="form-group-relative">
+                <i class="fa-solid fa-user"></i>
+                <input type="text" name="username" class="form-control" placeholder="Username" required autofocus>
+            </div>
+            
+            <!-- Password Input -->
+            <div class="form-group-relative">
+                <i class="fa-solid fa-lock"></i>
+                <input type="password" name="password" class="form-control" placeholder="Password" required>
+            </div>
+            
+            <!-- Submit Button -->
+            <button type="submit" class="btn btn-login mt-2">
+                <i class="fa-solid fa-right-to-bracket me-2"></i>Sign In
+            </button>
+        </form>
+        
+        <div class="text-center mt-4">
+            <small class="text-muted">Demo Access: <strong>sanjay / patel</strong></small>
+        </div>
+    </div>
+</div>
+
+<!-- Bootstrap JS -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

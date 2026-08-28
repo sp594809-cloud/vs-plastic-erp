@@ -1,0 +1,89 @@
+<%- include('../layouts/header') %>
+<%- include('../layouts/sidebar') %>
+
+<div class="row mb-3 align-items-center">
+    <div class="col-sm-6">
+        <h1 class="m-0 text-dark">Bank Accounts Settings</h1>
+    </div>
+</div>
+
+<div class="row">
+    <!-- Add Bank Form -->
+    <div class="col-md-4 mb-4">
+        <div class="card">
+            <div class="card-header bg-light">Add Bank Account</div>
+            <div class="card-body">
+                <form action="/settings/bank/add" method="POST">
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Bank Name <span class="text-danger">*</span></label>
+                        <input type="text" name="name" class="form-control" placeholder="e.g. State Bank of India" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Account Number <span class="text-danger">*</span></label>
+                        <input type="text" name="ac_no" class="form-control" placeholder="Enter A/C Number" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">IFSC Code <span class="text-danger">*</span></label>
+                        <input type="text" name="ifsc" class="form-control text-uppercase" placeholder="Enter IFSC" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Branch</label>
+                        <input type="text" name="branch" class="form-control" placeholder="Branch location">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Opening Balance (₹)</label>
+                        <input type="number" step="0.01" name="opening_balance" class="form-control" value="0.00">
+                    </div>
+                    <button type="submit" class="btn btn-primary w-100">
+                        <i class="fa-solid fa-plus me-1"></i>Register Bank A/C
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Registered Banks List -->
+    <div class="col-md-8 mb-4">
+        <div class="card">
+            <div class="card-header bg-light">Registered Bank Accounts</div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Bank Details</th>
+                                <th>A/C No & IFSC</th>
+                                <th class="text-end">Opening Balance</th>
+                                <th class="text-end">Current Balance</th>
+                                <th class="text-center">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <% banks.forEach(bk => { %>
+                                <tr>
+                                    <td class="fw-bold">
+                                        <%= bk.name %><br>
+                                        <small class="text-muted"><%= bk.branch || 'Main Branch' %></small>
+                                    </td>
+                                    <td>
+                                        A/C: <strong><%= bk.ac_no %></strong><br>
+                                        IFSC: <small class="text-muted"><%= bk.ifsc %></small>
+                                    </td>
+                                    <td class="text-end">₹<%= bk.opening_balance.toFixed(2) %></td>
+                                    <td class="text-end fw-bold text-success">₹<%= bk.current_balance.toFixed(2) %></td>
+                                    <td class="text-center">
+                                        <a href="/settings/bank/delete/<%= bk.id %>" class="btn btn-sm btn-outline-danger" onclick="return confirm('Are you sure you want to delete this bank account?');">
+                                            <i class="fa-solid fa-trash"></i>
+                                        </a>
+                                    </td>
+                                </tr>
+                            <% }) %>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<%- include('../layouts/footer') %>

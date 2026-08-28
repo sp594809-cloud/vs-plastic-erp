@@ -1,0 +1,22 @@
+{
+  "name": "VS Plastic ERP",
+  "short_name": "VS Plastic",
+  "description": "Billing and Inventory Management PWA Replica for VS Plastic",
+  "start_url": "/dashboard",
+  "display": "standalone",
+  "background_color": "#1a252f",
+  "theme_color": "#1a252f",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "/images/icon-192.png",
+      "type": "image/png",
+      "sizes": "192x192"
+    },
+    {
+      "src": "/images/icon-512.png",
+      "type": "image/png",
+      "sizes": "512x512"
+    }
+  ]
+}

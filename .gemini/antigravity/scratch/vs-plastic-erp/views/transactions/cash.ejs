@@ -1,0 +1,104 @@
+<%- include('../layouts/header') %>
+<%- include('../layouts/sidebar') %>
+
+<div class="row mb-3 align-items-center">
+    <div class="col-sm-6">
+        <h1 class="m-0 text-dark"><%= __('Cash Records') %> (Cash Book)</h1>
+    </div>
+</div>
+
+<!-- Stat Row -->
+<div class="row mb-3">
+    <div class="col-md-4">
+        <div class="card bg-success text-white">
+            <div class="card-body">
+                <h6>Total Receipts (+)</h6>
+                <h3>₹<%= stats.totalReceipts.toFixed(2) %></h3>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card bg-danger text-white">
+            <div class="card-body">
+                <h6>Total Payments (-)</h6>
+                <h3>₹<%= stats.totalPayments.toFixed(2) %></h3>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card bg-primary text-white">
+            <div class="card-body">
+                <h6>Net Cash in Hand</h6>
+                <h3>₹<%= stats.netCash.toFixed(2) %></h3>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header bg-light">Daily Cash Ledger Entries</div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table id="cashTable" class="table table-bordered table-striped align-middle">
+                <thead>
+                    <tr>
+                        <th><%= __('Date') %></th>
+                        <th>Description</th>
+                        <th><%= __('Party Name') %></th>
+                        <th class="text-end">Receipts (+)</th>
+                        <th class="text-end">Payments (-)</th>
+                        <th class="text-end">Running Balance</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <% let balance = 0; %>
+                    <% transactions.forEach(tx => { %>
+                        <% if (tx.type === 'Receipt') { balance += tx.amount; } else { balance -= tx.amount; } %>
+                        <tr>
+                            <td><%= new Date(tx.date).toLocaleDateString('en-GB') %></td>
+                            <td><%= tx.description || 'Ledger entry' %></td>
+                            <td class="fw-bold"><%= tx.party_name || '-' %></td>
+                            <td class="text-end text-success fw-bold">
+                                <%= tx.type === 'Receipt' ? '₹' + tx.amount.toFixed(2) : '-' %>
+                            </td>
+                            <td class="text-end text-danger fw-bold">
+                                <%= tx.type === 'Payment' ? '₹' + tx.amount.toFixed(2) : '-' %>
+                            </td>
+                            <td class="text-end fw-bold">₹<%= balance.toFixed(2) %></td>
+                        </tr>
+                    <% }) %>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+    window.addEventListener('DOMContentLoaded', () => {
+        $('#cashTable').DataTable({
+            language: window.dtLanguageConfig,
+            dom: 'Bfrtip',
+            buttons: [
+                {
+                    extend: 'excelHtml5',
+                    text: '<i class="fa-solid fa-file-excel me-1"></i> Excel',
+                    className: 'btn btn-success btn-sm'
+                },
+                {
+                    extend: 'pdfHtml5',
+                    text: '<i class="fa-solid fa-file-pdf me-1"></i> PDF',
+                    className: 'btn btn-danger btn-sm'
+                },
+                {
+                    extend: 'print',
+                    text: '<i class="fa-solid fa-print me-1"></i> Print',
+                    className: 'btn btn-dark btn-sm'
+                }
+            ],
+            pageLength: 25,
+            order: [[0, 'asc']]
+        });
+    });
+</script>
+
+<%- include('../layouts/footer') %>

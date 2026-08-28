@@ -1,0 +1,21 @@
+{
+  "name": "vs-plastic-erp",
+  "version": "1.0.0",
+  "description": "Replica of VS Plastic ERP billing & inventory software as a PWA",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "body-parser": "^1.20.3",
+    "ejs": "^3.1.10",
+    "express": "^4.21.0",
+    "express-session": "^1.18.0",
+    "sqlite3": "^5.1.7"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "private": true
+}
