@@ -9,6 +9,31 @@
 </div> <!-- /#page-content-wrapper -->
 </div> <!-- /#wrapper -->
 
+
+<!-- Mobile bottom navigation (PWA / phone) -->
+<nav class="mobile-bottom-nav no-print" aria-label="Mobile primary">
+    <a href="/dashboard" class="<%= typeof currentRoute !== 'undefined' && currentRoute === 'dashboard' ? 'active' : '' %>">
+        <i class="fa-solid fa-chart-line"></i>
+        <span>Home</span>
+    </a>
+    <a href="/sales/bill" class="<%= typeof currentRoute !== 'undefined' && (currentRoute === 'sales-bill' || currentRoute === 'sales-challan') ? 'active' : '' %>">
+        <i class="fa-solid fa-file-invoice-dollar"></i>
+        <span>Sales</span>
+    </a>
+    <a href="/sales/bill/add" class="<%= typeof currentRoute !== 'undefined' && currentRoute === 'sales-bill' ? '' : '' %>">
+        <i class="fa-solid fa-plus-circle"></i>
+        <span>New Bill</span>
+    </a>
+    <a href="/master/party" class="<%= typeof currentRoute !== 'undefined' && currentRoute === 'master-party' ? 'active' : '' %>">
+        <i class="fa-solid fa-users"></i>
+        <span>Party</span>
+    </a>
+    <a href="/reports" class="<%= typeof currentRoute !== 'undefined' && currentRoute === 'reports' ? 'active' : '' %>">
+        <i class="fa-solid fa-chart-pie"></i>
+        <span>Reports</span>
+    </a>
+</nav>
+
 <!-- Scripts -->
 <!-- jQuery -->
 <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
@@ -33,6 +58,11 @@
 <!-- Menu Toggle & Bootstrap Toast Initialization -->
 <script>
     $(document).ready(function() {
+        // Phone: start with sidebar closed
+        if (window.matchMedia('(max-width: 991.98px)').matches) {
+            $('#sidebar-wrapper').addClass('collapsed');
+        }
+
         // Toggle Sidebar
         $("#menu-toggle").click(function(e) {
             e.preventDefault();
@@ -43,6 +73,11 @@
         $('.select2').select2({
             width: '100%'
         });
+
+        // Init sales/purchase bill form product rows (must run after Select2 is ready)
+        if (typeof window.initBillFormPage === 'function') {
+            window.initBillFormPage();
+        }
 
         // Initialize Bootstrap Toasts
         var toastElList = [].slice.call(document.querySelectorAll('.toast'));
@@ -73,6 +108,24 @@
 
         // Expose translation helper and language configs to specific page scripts
         window.dtLanguageConfig = dtLanguage;
+    });
+
+    
+    // Mobile sidebar overlay close on link click
+    $(document).on('click', '#sidebar-wrapper .nav-link', function() {
+        if (window.innerWidth < 992) {
+            $('#sidebar-wrapper').addClass('collapsed');
+            $('#sidebar-overlay').removeClass('show');
+        }
+    });
+    $('#menu-toggle').off('click').on('click', function(e) {
+        e.preventDefault();
+        $('#sidebar-wrapper').toggleClass('collapsed');
+        $('#sidebar-overlay').toggleClass('show');
+    });
+    $(document).on('click', '#sidebar-overlay', function() {
+        $('#sidebar-wrapper').addClass('collapsed');
+        $('#sidebar-overlay').removeClass('show');
     });
 
     // PWA Service Worker Registration

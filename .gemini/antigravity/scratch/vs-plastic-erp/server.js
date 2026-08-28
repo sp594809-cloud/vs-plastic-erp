@@ -8,6 +8,13 @@ const db = require('./db/connection');
 const translate = require('./utils/translate');
 const numberToWords = require('./utils/numberToWords');
 
+// GSTIN validation (15 chars Indian GST format)
+function isValidGstin(gstin) {
+    if (!gstin || typeof gstin !== 'string') return false;
+    const g = gstin.trim().toUpperCase();
+    return /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/.test(g);
+}
+
 const app = express();
 const PORT = process.env.PORT || 3001;
 
@@ -234,6 +241,10 @@ app.get('/master/party/add', requireAuth, (req, res) => {
 
 app.post('/master/party/add', requireAuth, async (req, res) => {
     const { name, type, address, shipping_address, gstin, state, state_code, contact_person, mobile, email, opening_balance, balance_type } = req.body;
+    if (!gstin || !isValidGstin(gstin)) {
+        req.session.error_msg = "Valid GSTIN (15 characters) is mandatory for party.";
+        return res.redirect('/master/party/add');
+    }
     const opBal = parseFloat(opening_balance) || 0;
     const currentBal = opBal * (balance_type === 'Dr' ? 1 : -1);
 
@@ -262,6 +273,10 @@ app.get('/master/party/edit/:id', requireAuth, async (req, res) => {
 
 app.post('/master/party/edit/:id', requireAuth, async (req, res) => {
     const { name, type, address, shipping_address, gstin, state, state_code, contact_person, mobile, email, opening_balance, balance_type } = req.body;
+    if (!gstin || !isValidGstin(gstin)) {
+        req.session.error_msg = "Valid GSTIN (15 characters) is mandatory for party.";
+        return res.redirect('/master/party/edit/' + req.params.id);
+    }
     const opBal = parseFloat(opening_balance) || 0;
     
     try {
@@ -486,6 +501,11 @@ app.post('/sales/bill/add', requireAuth, async (req, res) => {
                 // If final sale -> reduce product current stock level & create stock ledger entry
                 if (isDraft === 0) {
                     const qty = parseFloat(item.quantity) || 0;
+                    const prodStock = await db.getOne("SELECT current_stock, name FROM products WHERE id = ?", [item.product_id]);
+                    if (prodStock && (prodStock.current_stock - qty) < 0) {
+                        // still allow sale but log; soft guard - prefer not to block business
+                        console.warn(`Stock low for product ${prodStock.name}: ${prodStock.current_stock} available, selling ${qty}`);
+                    }
                     await db.runQuery("UPDATE products SET current_stock = current_stock - ? WHERE id = ?", [qty, item.product_id]);
                     await db.runQuery(
                         `INSERT INTO stock_ledger (product_id, type, qty, bags, date, reference_table, reference_id, description) 
@@ -533,7 +553,7 @@ app.get('/sales/bill/print/:id', requireAuth, async (req, res) => {
         const year = await db.getOne("SELECT name FROM financial_years WHERE id = ?", [invoice.financial_year_id]);
 
         // CGST / SGST / IGST visual trigger
-        const taxMode = (party.state_code === company.gstin.substring(0, 2)) ? 'intra' : 'inter';
+        const taxMode = (party.state_code && company.gstin && party.state_code === company.gstin.substring(0, 2)) ? 'intra' : 'inter';
         const grandTotalWords = numberToWords(invoice.grand_total);
 
         res.render('sales/print_invoice', {
@@ -634,6 +654,11 @@ app.post('/sales/bill/edit/:id', requireAuth, async (req, res) => {
 
                 if (isDraft === 0) {
                     const qty = parseFloat(item.quantity) || 0;
+                    const prodStock = await db.getOne("SELECT current_stock, name FROM products WHERE id = ?", [item.product_id]);
+                    if (prodStock && (prodStock.current_stock - qty) < 0) {
+                        // still allow sale but log; soft guard - prefer not to block business
+                        console.warn(`Stock low for product ${prodStock.name}: ${prodStock.current_stock} available, selling ${qty}`);
+                    }
                     await db.runQuery("UPDATE products SET current_stock = current_stock - ? WHERE id = ?", [qty, item.product_id]);
                     await db.runQuery(
                         `INSERT INTO stock_ledger (product_id, type, qty, bags, date, reference_table, reference_id, description) 

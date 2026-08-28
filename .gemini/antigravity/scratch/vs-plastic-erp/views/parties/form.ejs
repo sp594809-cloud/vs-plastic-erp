@@ -29,9 +29,9 @@
 
                 <!-- GST Number -->
                 <div class="col-md-4 mb-3">
-                    <label class="form-label fw-bold"><%= __('GST Number') %></label>
-                    <input type="text" name="gstin" id="gstin" class="form-control text-uppercase" value="<%= isEdit ? party.gstin : '' %>" placeholder="e.g. 24AABCV1234F1Z1" maxlength="15">
-                    <small class="text-muted">GST state & code will auto-fill based on first 2 digits.</small>
+                    <label class="form-label fw-bold"><%= __('GST Number') %> <span class="text-danger">*</span></label>
+                    <input type="text" name="gstin" id="gstin" class="form-control text-uppercase" value="<%= isEdit ? party.gstin : '' %>" placeholder="e.g. 24AABCV1234F1Z1" maxlength="15" required pattern="[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}" title="Enter valid 15-character GSTIN (e.g. 24AABCV1234F1Z1)">
+                    <small class="text-muted">Mandatory. GST state & code auto-fill from first 2 digits.</small>
                 </div>
 
                 <!-- GST State -->

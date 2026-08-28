@@ -5,6 +5,7 @@
 <div class="row mb-3 align-items-center no-print">
     <div class="col-sm-6">
         <h1 class="m-0 text-dark">Invoice Preview</h1>
+        <small class="text-muted">Prints Original + Duplicate + Triplicate (3 pages)</small>
     </div>
     <div class="col-sm-6 text-end">
         <a href="/sales/bill" class="btn btn-secondary me-2">
@@ -16,206 +17,488 @@
     </div>
 </div>
 
-<div class="print-invoice-box">
-    <!-- GST Tax Invoice Header -->
-    <div class="row align-items-center border-bottom pb-3 mb-4">
-        <div class="col-md-6">
-            <div class="invoice-header-title text-uppercase"><%= invoice.type === 'Invoice' ? 'Tax Invoice' : 'Delivery Challan' %></div>
-            <div class="text-muted">Original for Recipient</div>
-        </div>
-        <div class="col-md-6 text-end">
-            <h4 class="fw-bold text-primary mb-0"><%= company.name %></h4>
-            <small class="text-muted"><%= company.address %></small><br>
-            <small class="text-muted">GSTIN: <strong><%= company.gstin %></strong> | Mobile: <%= company.phone %></small>
-        </div>
-    </div>
+<% 
+  const copyLabels = ['Original', 'Duplicate', 'Triplicate'];
+  const invDate = new Date(invoice.date).toLocaleDateString('en-GB');
+  const cgstAmt = taxMode === 'intra' ? (invoice.tax_total / 2) : 0;
+  const sgstAmt = taxMode === 'intra' ? (invoice.tax_total / 2) : 0;
+  const igstAmt = taxMode === 'inter' ? invoice.tax_total : 0;
+  // Prefer first item rates if available, else derive from totals
+  let cgstPct = 0, sgstPct = 0, igstPct = 0;
+  if (items && items.length > 0) {
+    cgstPct = items[0].cgst_percent || 0;
+    sgstPct = items[0].sgst_percent || 0;
+    igstPct = items[0].igst_percent || 0;
+  }
+  // Target ~12 item rows so the form fills A4 (empty rows pad remaining space)
+  const targetItemRows = 12;
+  const emptyRows = Math.max(0, targetItemRows - (items ? items.length : 0));
+%>
 
-    <!-- Invoice Meta Metadata -->
-    <div class="row border-bottom pb-3 mb-4">
-        <div class="col-sm-4 border-end">
-            <span class="invoice-meta-label">Invoice Details:</span>
-            <div class="mt-1">
-                <strong>Invoice No:</strong> <%= invoice.invoice_no %><br>
-                <strong>Date:</strong> <%= new Date(invoice.date).toLocaleDateString('en-GB') %><br>
-                <strong>Financial Year:</strong> <%= financialYear %><br>
-            </div>
+<% copyLabels.forEach(function(copyLabel, copyIndex) { %>
+<div class="vs-invoice-page <%= copyIndex < copyLabels.length - 1 ? 'page-break-after' : '' %>">
+  <table class="vs-inv-outer">
+    <!-- HEADER -->
+    <tr>
+      <td colspan="2" class="vs-inv-header">
+        <div class="vs-copy-label"><%= copyLabel %></div>
+        <div class="vs-company-name"><%= company.name || 'VS Plastic' %></div>
+        <div class="vs-company-addr"><%= company.address || '' %></div>
+        <div class="vs-company-tagline">All Type Plastic Artical Manufacturer &amp; Job Works</div>
+        <div class="vs-company-gst">
+          <strong>GSTIN:</strong> <%= company.gstin || '' %>
+          &nbsp;&nbsp;&nbsp;
+          <strong>Phone:</strong> <%= company.phone || '' %>
         </div>
-        <div class="col-sm-4 border-end">
-            <span class="invoice-meta-label">Billed To (Party):</span>
-            <div class="mt-1">
-                <strong><%= party.name %></strong><br>
-                <%= party.address %><br>
-                <strong>GSTIN:</strong> <%= party.gstin || 'N/A' %><br>
-                <strong>State:</strong> <%= party.state || 'N/A' %> (Code: <%= party.state_code || 'N/A' %>)<br>
-                <strong>Mobile:</strong> <%= party.mobile || 'N/A' %>
-            </div>
-        </div>
-        <div class="col-sm-4">
-            <span class="invoice-meta-label">Shipped To:</span>
-            <div class="mt-1">
-                <strong><%= party.name %></strong><br>
-                <%= party.shipping_address || party.address %><br>
-            </div>
-        </div>
-    </div>
+      </td>
+    </tr>
 
-    <!-- Items Grid Table -->
-    <div class="table-responsive mb-4">
-        <table class="table table-bordered table-sm align-middle">
-            <thead class="table-light text-center">
-                <tr>
-                    <th rowspan="2" style="width: 5%;">#</th>
-                    <th rowspan="2" style="width: 25%;">Product Description</th>
-                    <th rowspan="2" style="width: 8%;">HSN/SAC</th>
-                    <th rowspan="2" style="width: 6%;">Bags</th>
-                    <th rowspan="2" style="width: 10%;">Quantity</th>
-                    <th rowspan="2" style="width: 8%;">Rate (₹)</th>
-                    <th rowspan="2" style="width: 10%;">Amount (₹)</th>
-                    <% if (taxMode === 'intra') { %>
-                        <th colspan="2" style="width: 10%;">CGST</th>
-                        <th colspan="2" style="width: 10%;">SGST</th>
-                    <% } else { %>
-                        <th colspan="2" style="width: 15%;">IGST</th>
-                    <% } %>
-                    <th rowspan="2" style="width: 13%;">Total (₹)</th>
-                </tr>
-                <tr>
-                    <% if (taxMode === 'intra') { %>
-                        <th>%</th>
-                        <th>Amt (₹)</th>
-                        <th>%</th>
-                        <th>Amt (₹)</th>
-                    <% } else { %>
-                        <th>%</th>
-                        <th>Amt (₹)</th>
-                    <% } %>
-                </tr>
-            </thead>
-            <tbody>
-                <% items.forEach((item, index) => { %>
-                    <tr>
-                        <td class="text-center"><%= index + 1 %></td>
-                        <td><strong><%= item.product_name %></strong></td>
-                        <td class="text-center"><%= item.hsn_sac || '-' %></td>
-                        <td class="text-center"><%= item.bags || '-' %></td>
-                        <td class="text-end"><%= item.quantity %> <%= item.unit %></td>
-                        <td class="text-end">₹<%= item.rate.toFixed(2) %></td>
-                        <td class="text-end">₹<%= item.amount.toFixed(2) %></td>
-                        <% if (taxMode === 'intra') { %>
-                            <td class="text-center"><%= item.cgst_percent %>%</td>
-                            <td class="text-end">₹<%= item.cgst_amount.toFixed(2) %></td>
-                            <td class="text-center"><%= item.sgst_percent %>%</td>
-                            <td class="text-end">₹<%= item.sgst_amount.toFixed(2) %></td>
-                        <% } else { %>
-                            <td class="text-center"><%= item.igst_percent %>%</td>
-                            <td class="text-end">₹<%= item.igst_amount.toFixed(2) %></td>
-                        <% } %>
-                        <td class="text-end fw-bold">₹<%= item.total.toFixed(2) %></td>
-                    </tr>
-                <% }) %>
-                <!-- Empty padding rows for neat A4 layout height -->
-                <% for (let i = items.length; i < 5; i++) { %>
-                    <tr style="height: 30px;">
-                        <td></td><td></td><td></td><td></td><td></td><td></td><td></td>
-                        <% if (taxMode === 'intra') { %>
-                            <td></td><td></td><td></td><td></td>
-                        <% } else { %>
-                            <td></td><td></td>
-                        <% } %>
-                        <td></td>
-                    </tr>
-                <% } %>
-                <!-- Totals row -->
-                <tr class="table-light fw-bold">
-                    <td colspan="3" class="text-center">Total</td>
-                    <td class="text-center"><%= items.reduce((acc, it) => acc + (it.bags || 0), 0) %></td>
-                    <td class="text-end"><%= items.reduce((acc, it) => acc + it.quantity, 0).toFixed(2) %></td>
-                    <td></td>
-                    <td class="text-end">₹<%= invoice.sub_total.toFixed(2) %></td>
-                    <% if (taxMode === 'intra') { %>
-                        <td></td>
-                        <td class="text-end">₹<%= items.reduce((acc, it) => acc + it.cgst_amount, 0).toFixed(2) %></td>
-                        <td></td>
-                        <td class="text-end">₹<%= items.reduce((acc, it) => acc + it.sgst_amount, 0).toFixed(2) %></td>
-                    <% } else { %>
-                        <td></td>
-                        <td class="text-end">₹<%= items.reduce((acc, it) => acc + it.igst_amount, 0).toFixed(2) %></td>
-                    <% } %>
-                    <td class="text-end">₹<%= (invoice.sub_total + invoice.tax_total).toFixed(2) %></td>
-                </tr>
-            </tbody>
+    <!-- TITLE -->
+    <tr>
+      <td colspan="2" class="vs-inv-title">Tax Invoice</td>
+    </tr>
+
+    <!-- META: Invoice / Transport -->
+    <tr>
+      <td class="vs-meta-cell">
+        <table class="vs-meta-inner">
+          <tr>
+            <td><strong>Invoice Number:</strong> <%= invoice.invoice_no %></td>
+          </tr>
+          <tr>
+            <td><strong>Invoice Date:</strong> <%= invDate %></td>
+          </tr>
+          <tr>
+            <td><strong>Reverse Charge:</strong> No</td>
+          </tr>
         </table>
-    </div>
+      </td>
+      <td class="vs-meta-cell">
+        <table class="vs-meta-inner">
+          <tr>
+            <td><strong>Transport Name:</strong> <%= invoice.transport_name || '' %></td>
+          </tr>
+          <tr>
+            <td><strong>Transport Mode:</strong> <%= invoice.transport_mode || 'By Road' %></td>
+          </tr>
+          <tr>
+            <td><strong>Date of Supply:</strong> <%= invDate %></td>
+          </tr>
+        </table>
+      </td>
+    </tr>
 
-    <!-- Bottom summary row -->
-    <div class="row">
-        <!-- Amount in words & Bank info -->
-        <div class="col-md-7">
-            <div class="border p-2 mb-3 bg-light rounded">
-                <strong>Amount in Words:</strong><br>
-                <span class="text-capitalize text-primary"><%= grandTotalWords %> Only</span>
-            </div>
-            
-            <div class="border p-2 rounded">
-                <strong>Our Bank Account Details:</strong><br>
-                Bank Name: <strong><%= company.bank_name %></strong><br>
-                A/C No: <strong><%= company.bank_ac_no %></strong><br>
-                IFSC: <strong><%= company.bank_ifsc %></strong> | Branch: <%= company.bank_branch %>
-            </div>
-        </div>
+    <!-- BILL TO / SHIP TO -->
+    <tr>
+      <td class="vs-party-cell">
+        <div class="vs-party-heading">Bill To Party</div>
+        <table class="vs-party-inner">
+          <tr>
+            <td><strong>Name:</strong> <%= party.name %></td>
+          </tr>
+          <tr>
+            <td><strong>Address:</strong> <%= party.address || '' %></td>
+          </tr>
+          <tr>
+            <td><strong>GSTIN:</strong> <%= party.gstin || '' %></td>
+          </tr>
+          <tr>
+            <td>
+              <strong>State:</strong> <%= party.state || '' %>
+              &nbsp;&nbsp;&nbsp;
+              <strong>Code:</strong> <%= party.state_code || '' %>
+            </td>
+          </tr>
+        </table>
+      </td>
+      <td class="vs-party-cell">
+        <div class="vs-party-heading">Ship To Party</div>
+        <table class="vs-party-inner">
+          <tr>
+            <td><strong>Name:</strong> <%= party.name %></td>
+          </tr>
+          <tr>
+            <td><strong>Address:</strong> <%= party.shipping_address || party.address || '' %></td>
+          </tr>
+          <tr>
+            <td><strong>GSTIN:</strong> <%= party.gstin || '' %></td>
+          </tr>
+          <tr>
+            <td><strong>Vehicle Number:</strong> <%= invoice.vehicle_number || '' %></td>
+          </tr>
+        </table>
+      </td>
+    </tr>
 
-        <!-- Right Side summary and signatures -->
-        <div class="col-md-5">
-            <table class="table table-bordered table-sm align-middle text-end mb-3">
-                <tr>
-                    <td class="fw-bold">Sub-Total Amount:</td>
-                    <td style="width: 40%;">₹<%= invoice.sub_total.toFixed(2) %></td>
-                </tr>
-                <% if (taxMode === 'intra') { %>
-                    <tr>
-                        <td class="text-muted">Add CGST:</td>
-                        <td>₹<%= (invoice.tax_total / 2).toFixed(2) %></td>
-                    </tr>
-                    <tr>
-                        <td class="text-muted">Add SGST:</td>
-                        <td>₹<%= (invoice.tax_total / 2).toFixed(2) %></td>
-                    </tr>
-                <% } else { %>
-                    <tr>
-                        <td class="text-muted">Add IGST:</td>
-                        <td>₹<%= invoice.tax_total.toFixed(2) %></td>
-                    </tr>
-                <% } %>
-                <tr>
-                    <td class="fw-bold">Total Taxes:</td>
-                    <td>₹<%= invoice.tax_total.toFixed(2) %></td>
-                </tr>
-                <tr>
-                    <td class="text-muted">Round Off:</td>
-                    <td>₹<%= invoice.round_off.toFixed(2) %></td>
-                </tr>
-                <tr class="table-dark fs-6 text-white fw-bold">
-                    <td>Grand Total Amount:</td>
-                    <td>₹<%= invoice.grand_total.toFixed(2) %></td>
-                </tr>
-            </table>
-        </div>
-    </div>
+    <!-- ITEMS TABLE -->
+    <tr>
+      <td colspan="2" class="vs-items-wrap">
+        <table class="vs-items-table">
+          <thead>
+            <tr>
+              <th style="width:6%;">Sr No.</th>
+              <th style="width:34%;">Product Description</th>
+              <th style="width:12%;">HSN Code</th>
+              <th style="width:12%;">QTY</th>
+              <th style="width:10%;">Unit</th>
+              <th style="width:12%;">Rate</th>
+              <th style="width:14%;">Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% items.forEach(function(item, idx) { %>
+            <tr>
+              <td class="text-center"><%= idx + 1 %></td>
+              <td><%= item.product_name %></td>
+              <td class="text-center"><%= item.hsn_sac || '' %></td>
+              <td class="text-end"><%= Number(item.quantity).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) %></td>
+              <td class="text-center"><%= item.unit || 'Pcs' %></td>
+              <td class="text-end"><%= Number(item.rate).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) %></td>
+              <td class="text-end"><%= Number(item.amount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) %></td>
+            </tr>
+            <% }); %>
+            <% for (let r = 0; r < emptyRows; r++) { %>
+            <tr class="vs-empty-row">
+              <td>&nbsp;</td><td></td><td></td><td></td><td></td><td></td><td></td>
+            </tr>
+            <% } %>
+          </tbody>
+        </table>
+      </td>
+    </tr>
 
-    <!-- Signatures -->
-    <div class="row mt-5">
-        <div class="col-6">
-            <div class="pt-5 border-top text-center text-muted" style="width: 60%; margin-top: 50px;">
-                Receiver's Signature
-            </div>
+    <!-- TOTALS + WORDS + TAX -->
+    <tr>
+      <td class="vs-bottom-left">
+        <div class="vs-words-label">Total Invoice amount in words</div>
+        <div class="vs-words-value"><%= grandTotalWords %> Only /-</div>
+        <div class="vs-bank-box">
+          <div class="vs-bank-title">Bank Details</div>
+          <div><strong>Bank Name:</strong> <%= company.bank_name || '' %></div>
+          <div><strong>Bank Branch:</strong> <%= company.bank_branch || '' %></div>
+          <div><strong>Bank A/C:</strong> <%= company.bank_ac_no || '' %></div>
+          <div><strong>Bank IFSC:</strong> <%= company.bank_ifsc || '' %></div>
         </div>
-        <div class="col-6 text-end">
-            <div class="d-inline-block text-center text-muted" style="width: 60%; margin-top: 50px;">
-                For, <strong><%= company.name %></strong>
-                <div class="pt-5 mt-4 border-top">Authorized Signatory</div>
-            </div>
+      </td>
+      <td class="vs-bottom-right">
+        <table class="vs-tax-table">
+          <tr>
+            <td>Total amount before tax</td>
+            <td class="text-end"><%= Number(invoice.sub_total).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) %></td>
+          </tr>
+          <tr>
+            <td>CGST: <%= cgstPct %>%</td>
+            <td class="text-end"><%= Number(cgstAmt).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) %></td>
+          </tr>
+          <tr>
+            <td>SGST: <%= sgstPct %>%</td>
+            <td class="text-end"><%= Number(sgstAmt).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) %></td>
+          </tr>
+          <tr>
+            <td>IGST: <%= igstPct %>%</td>
+            <td class="text-end"><%= Number(igstAmt).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) %></td>
+          </tr>
+          <tr class="vs-grand-row">
+            <td><strong>Total amount</strong></td>
+            <td class="text-end"><strong>₹ <%= Number(invoice.grand_total).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) %></strong></td>
+          </tr>
+        </table>
+        <div class="vs-cert">
+          Certified that the particulars given above are true and correct
         </div>
-    </div>
+        <div class="vs-sign-block">
+          <div class="vs-for">For, <%= company.name || 'VS Plastic' %></div>
+          <div class="vs-sign-space"></div>
+          <div class="vs-sign-label">Authorised Signature</div>
+        </div>
+        <div class="vs-seal">Common Seal</div>
+      </td>
+    </tr>
+  </table>
 </div>
+<% }); %>
+
+<style>
+/* ===== VS Plastic Tax Invoice – tight A4 layout (no large bottom gap) ===== */
+.vs-invoice-page {
+  background: #fff;
+  margin: 0 auto 16px;
+  max-width: 210mm;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 11px;
+  color: #000;
+}
+
+.vs-inv-outer {
+  width: 100%;
+  border-collapse: collapse;
+  border: 1.5px solid #000;
+  table-layout: fixed;
+}
+
+.vs-inv-outer > tbody > tr > td {
+  border: 1px solid #000;
+  vertical-align: top;
+  padding: 0;
+}
+
+/* Header – compact */
+.vs-inv-header {
+  text-align: center;
+  padding: 6px 8px 7px !important;
+  position: relative;
+}
+.vs-copy-label {
+  position: absolute;
+  top: 5px;
+  right: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #1a56a8;
+}
+.vs-company-name {
+  font-size: 20px;
+  font-weight: 700;
+  color: #1a56a8;
+  letter-spacing: 0.3px;
+  line-height: 1.15;
+}
+.vs-company-addr {
+  font-size: 10.5px;
+  margin-top: 1px;
+}
+.vs-company-tagline {
+  font-size: 10.5px;
+  font-style: italic;
+  margin-top: 0;
+}
+.vs-company-gst {
+  font-size: 10.5px;
+  margin-top: 2px;
+}
+
+/* Title */
+.vs-inv-title {
+  text-align: center;
+  font-size: 14px;
+  font-weight: 700;
+  padding: 4px 6px !important;
+  background: #f5f5f5;
+  letter-spacing: 0.4px;
+}
+
+/* Meta row */
+.vs-meta-cell {
+  width: 50%;
+  padding: 0 !important;
+}
+.vs-meta-inner {
+  width: 100%;
+  border-collapse: collapse;
+}
+.vs-meta-inner td {
+  border: none;
+  border-bottom: 1px solid #ccc;
+  padding: 3px 7px;
+  font-size: 10.5px;
+}
+.vs-meta-inner tr:last-child td {
+  border-bottom: none;
+}
+
+/* Party row */
+.vs-party-cell {
+  width: 50%;
+  padding: 0 !important;
+}
+.vs-party-heading {
+  background: #e8e8e8;
+  font-weight: 700;
+  text-align: center;
+  padding: 3px 5px;
+  border-bottom: 1px solid #000;
+  font-size: 10.5px;
+}
+.vs-party-inner {
+  width: 100%;
+  border-collapse: collapse;
+}
+.vs-party-inner td {
+  border: none;
+  padding: 2px 7px;
+  font-size: 10.5px;
+  line-height: 1.3;
+}
+
+/* Items – compact rows, fills vertical space */
+.vs-items-wrap {
+  padding: 0 !important;
+}
+.vs-items-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+.vs-items-table th {
+  background: #e8e8e8;
+  border: 1px solid #000;
+  padding: 3px 2px;
+  font-size: 10px;
+  font-weight: 700;
+  text-align: center;
+}
+.vs-items-table td {
+  border: 1px solid #000;
+  padding: 2px 4px;
+  font-size: 10.5px;
+  height: 18px;
+}
+.vs-items-table .text-center { text-align: center; }
+.vs-items-table .text-end { text-align: right; }
+.vs-empty-row td {
+  height: 18px;
+  border-left: 1px solid #000;
+  border-right: 1px solid #000;
+  border-top: none;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+/* Bottom – no extra whitespace */
+.vs-bottom-left {
+  width: 55%;
+  padding: 5px 7px !important;
+  vertical-align: top !important;
+}
+.vs-words-label {
+  font-weight: 700;
+  font-size: 10.5px;
+  margin-bottom: 1px;
+}
+.vs-words-value {
+  font-size: 11px;
+  margin-bottom: 6px;
+  min-height: 28px;
+}
+.vs-bank-box {
+  border: 1px solid #000;
+  padding: 4px 6px;
+  font-size: 10px;
+  line-height: 1.4;
+}
+.vs-bank-title {
+  font-weight: 700;
+  margin-bottom: 2px;
+  font-size: 10.5px;
+}
+
+.vs-bottom-right {
+  width: 45%;
+  padding: 0 !important;
+  vertical-align: top !important;
+}
+.vs-tax-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.vs-tax-table td {
+  border: 1px solid #000;
+  padding: 3px 5px;
+  font-size: 10.5px;
+}
+.vs-tax-table .text-end { text-align: right; }
+.vs-grand-row td {
+  background: #f0f0f0;
+  font-size: 11.5px;
+}
+.vs-cert {
+  padding: 4px 6px 1px;
+  font-size: 9.5px;
+  font-style: italic;
+}
+.vs-sign-block {
+  text-align: center;
+  padding: 2px 6px 4px;
+}
+.vs-for {
+  font-weight: 700;
+  font-size: 11.5px;
+}
+.vs-sign-space {
+  height: 36px; /* tighter signature gap */
+}
+.vs-sign-label {
+  font-size: 10.5px;
+  border-top: 1px solid #666;
+  display: inline-block;
+  padding-top: 2px;
+  min-width: 130px;
+}
+.vs-seal {
+  text-align: right;
+  padding: 0 8px 4px;
+  font-size: 9.5px;
+  color: #555;
+}
+
+/* Screen preview */
+@media screen {
+  .vs-invoice-page {
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    border: 1px solid #ccc;
+  }
+  .page-break-after {
+    margin-bottom: 28px;
+  }
+}
+
+/* Print – fill page, minimal outer margin */
+@media print {
+  body {
+    background: #fff !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+  #sidebar-wrapper,
+  .top-navbar,
+  .card-header,
+  .btn,
+  footer,
+  .no-print,
+  .dataTables_filter,
+  .dataTables_length,
+  .dataTables_paginate,
+  .dataTables_info,
+  .dt-buttons {
+    display: none !important;
+  }
+  #page-content-wrapper,
+  .container-fluid {
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+  .vs-invoice-page {
+    max-width: 100%;
+    margin: 0 !important;
+    box-shadow: none;
+    border: none;
+    height: auto;
+  }
+  .page-break-after {
+    page-break-after: always;
+    margin-bottom: 0 !important;
+  }
+  .vs-inv-outer {
+    border: 1.5px solid #000;
+    width: 100%;
+  }
+  /* Smaller page margins = less white space around the form */
+  @page {
+    size: A4;
+    margin: 6mm 6mm 6mm 6mm;
+  }
+}
+</style>
 
 <%- include('../layouts/footer') %>

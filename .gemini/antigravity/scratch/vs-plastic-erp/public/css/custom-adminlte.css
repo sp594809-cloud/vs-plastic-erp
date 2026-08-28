@@ -340,3 +340,167 @@ body {
     font-weight: 600;
     padding: 0.25rem 0.5rem;
 }
+
+/* ========== Mobile / Phone UI (PWA) ========== */
+.sidebar-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.45);
+    z-index: 998;
+}
+.sidebar-overlay.show {
+    display: block;
+}
+
+/* Bottom navigation for phones */
+.mobile-bottom-nav {
+    display: none;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 60px;
+    padding-bottom: env(safe-area-inset-bottom, 0);
+    background: #ffffff;
+    border-top: 1px solid #e5e7eb;
+    box-shadow: 0 -4px 16px rgba(0,0,0,0.08);
+    z-index: 1050;
+    justify-content: space-around;
+    align-items: center;
+}
+.mobile-bottom-nav a {
+    flex: 1;
+    text-align: center;
+    color: #6b7280;
+    text-decoration: none;
+    font-size: 0.65rem;
+    font-weight: 600;
+    padding: 6px 2px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+}
+.mobile-bottom-nav a i {
+    font-size: 1.15rem;
+}
+.mobile-bottom-nav a.active,
+.mobile-bottom-nav a:hover {
+    color: #1a56a8;
+}
+
+@media (max-width: 991.98px) {
+    #sidebar-wrapper {
+        position: fixed;
+        top: 0;
+        left: 0;
+        height: 100vh;
+        height: 100dvh;
+        margin-left: 0;
+        transform: translateX(0);
+        transition: transform 0.25s ease;
+        z-index: 999;
+    }
+    #sidebar-wrapper.collapsed {
+        transform: translateX(-100%);
+        margin-left: 0;
+    }
+    #page-content-wrapper {
+        width: 100%;
+        min-width: 0;
+    }
+    .top-navbar {
+        padding-left: 0.5rem !important;
+        padding-right: 0.5rem !important;
+    }
+    .container-fluid {
+        padding-left: 0.75rem !important;
+        padding-right: 0.75rem !important;
+        padding-bottom: 72px !important; /* space for bottom nav */
+    }
+    .mobile-bottom-nav {
+        display: flex;
+    }
+    /* Touch-friendly controls */
+    .btn, .form-control, .form-select {
+        min-height: 42px;
+    }
+    .btn-sm {
+        min-height: 36px;
+    }
+    .table-responsive {
+        -webkit-overflow-scrolling: touch;
+        margin-left: -0.25rem;
+        margin-right: -0.25rem;
+    }
+    .card {
+        border-radius: 12px;
+    }
+    .card-body {
+        padding: 0.9rem;
+    }
+    /* Bill form product table: stack-friendly */
+    #productTable {
+        font-size: 0.85rem;
+    }
+    #productTable .form-control,
+    #productTable .form-select {
+        min-height: 38px;
+        font-size: 0.85rem;
+        padding: 0.25rem 0.4rem;
+    }
+    .select2-container .select2-selection--single {
+        min-height: 38px !important;
+        display: flex !important;
+        align-items: center;
+    }
+    /* Dashboard small boxes */
+    .small-box {
+        margin-bottom: 0.75rem;
+    }
+    h1, .h1 {
+        font-size: 1.35rem;
+    }
+    /* Login card full width on phone */
+    .login-card {
+        width: 92% !important;
+        max-width: 400px;
+        margin: 0 auto;
+    }
+    footer.footer {
+        display: none;
+    }
+}
+
+@media (max-width: 575.98px) {
+    .dt-buttons {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        margin-bottom: 8px;
+    }
+    .dataTables_filter input {
+        width: 100% !important;
+        margin-left: 0 !important;
+    }
+    .row > [class*="col-"] {
+        margin-bottom: 0.35rem;
+    }
+}
+
+/* Safe area for notched phones when installed as PWA */
+@supports (padding: env(safe-area-inset-top)) {
+    body {
+        padding-top: env(safe-area-inset-top);
+    }
+    .mobile-bottom-nav {
+        padding-bottom: calc(env(safe-area-inset-bottom) + 4px);
+        height: calc(60px + env(safe-area-inset-bottom));
+    }
+}
+
+/* Select2 dropdown on mobile full width */
+.select2-container--open .select2-dropdown {
+    z-index: 2000;
+}

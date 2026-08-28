@@ -7,13 +7,13 @@
     </div>
     <div class="col-sm-6 text-end">
         <span class="badge bg-secondary p-2">
-            <i class="fa-solid fa-building me-1"></i>Company GST: <span id="companyGstDisplay"><%= activeCompany.gstin %></span> (Code: <span id="companyStateDisplay"><%= activeCompany.gstin.substring(0, 2) %></span>)
+            <i class="fa-solid fa-building me-1"></i>Company GST: <span id="companyGstDisplay"><%= activeCompany.gstin || "" %></span> (Code: <span id="companyStateDisplay"><%= (activeCompany.gstin || "").substring(0, 2) %></span>)
         </span>
     </div>
 </div>
 
 <form action="<%= isEdit ? '/sales/bill/edit/' + invoice.id : '/sales/bill/add' %>" method="POST" id="billForm">
-    <input type="hidden" name="company_state_code" id="company_state_code" value="<%= activeCompany.gstin.substring(0, 2) %>">
+    <input type="hidden" name="company_state_code" id="company_state_code" value="<%= (activeCompany.gstin || "").substring(0, 2) %>">
     <input type="hidden" name="tax_mode" id="tax_mode" value="intra"> <!-- "intra" (same state: CGST/SGST) or "inter" (different: IGST) -->
 
     <div class="card mb-4">
@@ -205,7 +205,11 @@
 </script>
 
 <script>
-    document.addEventListener("DOMContentLoaded", function() {
+    // Deferred init: runs after jQuery + Select2 load (called from footer)
+    window.initBillFormPage = function() {
+        if (window.__billFormInited) return;
+        window.__billFormInited = true;
+        (function() {
         let rowId = 0;
 
         // Auto invoice generation trigger
@@ -330,8 +334,15 @@
             $('#productTableBody').append(tr);
 
             // Init Select2 on the new row dropdown
-            $(`#row_${rowId} .select2-dyn`).select2({
-                width: '100%'
+            const $sel = $(`#row_${rowId} .select2-dyn`);
+            if ($sel.hasClass('select2-hidden-accessible')) {
+                $sel.select2('destroy');
+            }
+            $sel.select2({
+                width: '100%',
+                dropdownParent: $(document.body),
+                placeholder: '-- Choose Product --',
+                allowClear: true
             });
 
             // Auto-fill product rate and tax on change
@@ -466,7 +477,12 @@
         } else {
             addProductRow();
         }
-    });
+    })();
+    };
+    // Fallback if footer already ran
+    if (window.jQuery) {
+        window.initBillFormPage();
+    }
 </script>
 
 <%- include('../layouts/footer') %>

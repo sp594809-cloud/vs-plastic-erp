@@ -186,7 +186,11 @@
 </script>
 
 <script>
-    document.addEventListener("DOMContentLoaded", function() {
+    // Deferred init: runs after jQuery + Select2 load (called from footer)
+    window.initBillFormPage = function() {
+        if (window.__billFormInited) return;
+        window.__billFormInited = true;
+        (function() {
         let rowId = 0;
 
         $('#company_id').on('change', function() {
@@ -296,8 +300,15 @@
 
             $('#productTableBody').append(tr);
 
-            $(`#row_${rowId} .select2-dyn`).select2({
-                width: '100%'
+            const $sel = $(`#row_${rowId} .select2-dyn`);
+            if ($sel.hasClass('select2-hidden-accessible')) {
+                $sel.select2('destroy');
+            }
+            $sel.select2({
+                width: '100%',
+                dropdownParent: $(document.body),
+                placeholder: '-- Choose Product --',
+                allowClear: true
             });
 
             // Auto-fill product rate and tax on change (uses PURCHASE rate here!)
@@ -423,7 +434,12 @@
         } else {
             addProductRow();
         }
-    });
+    })();
+    };
+    // Fallback if footer already ran
+    if (window.jQuery) {
+        window.initBillFormPage();
+    }
 </script>
 
 <%- include('../layouts/footer') %>
