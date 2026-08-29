@@ -1,52 +1,60 @@
-# VS Plastic ERP – Bug fixes + PWA + Mobile UI
+# Connect VS Plastic ERP to TiDB Cloud (persistent DB)
 
-## Apply these files
-Copy into your project root at:
-`.gemini/antigravity/scratch/vs-plastic-erp/`
+## Why
+Local SQLite file is wiped on many hosts when the app restarts/redeploys.
+TiDB Cloud keeps bills, parties, products permanently.
 
-Overwrite matching paths:
-- server.js
-- views/sales/bill_form.ejs
-- views/sales/print_invoice.ejs
-- views/purchases/bill_form.ejs
-- views/parties/form.ejs
-- views/layouts/header.ejs
-- views/layouts/footer.ejs
-- views/layouts/sidebar.ejs
-- public/css/custom-adminlte.css
-- public/manifest.json
-- public/service-worker.js
+## 1. Files to copy into your app
+Put these into `.gemini/antigravity/scratch/vs-plastic-erp/`:
 
-Then:
+- `db/connection.js`          (TiDB + SQLite fallback)
+- `db/schema.mysql.sql`       (MySQL/TiDB schema)
+- `db/seeds.sql`              (unchanged seed data)
+- `server.js`                 (loads dotenv + DATE_FORMAT fix)
+- `package.json`              (adds mysql2 + dotenv)
+- `.env.example`
+- `.gitignore`                (ignores `.env`)
+
+## 2. Install
 ```bash
 cd .gemini/antigravity/scratch/vs-plastic-erp
 npm install
+```
+
+## 3. Local `.env` (never commit this file)
+```env
+DB_HOST=gateway01.ap-southeast-1.prod.aws.tidbcloud.com
+DB_PORT=4000
+DB_USER=Be1MriyfRQUTywa.root
+DB_PASSWORD=your_password_here
+DB_NAME=vsplastic
+DB_SSL_REJECT_UNAUTHORIZED=true
+```
+
+Use database **`vsplastic`** (not `sys`).
+
+## 4. Deploy platform env vars
+On Render / Railway / Vercel / Fly / etc. set the same keys:
+
+| Variable | Value |
+|----------|--------|
+| DB_HOST | gateway01.ap-southeast-1.prod.aws.tidbcloud.com |
+| DB_PORT | 4000 |
+| DB_USER | Be1MriyfRQUTywa.root |
+| DB_PASSWORD | (your TiDB password) |
+| DB_NAME | vsplastic |
+| DB_SSL_REJECT_UNAUTHORIZED | true |
+
+## 5. Run
+```bash
 npm start
 ```
-Open http://localhost:3001
 
-## What was fixed / added
+First start creates tables + seeds (user `sanjay` / `patel`).
+Later starts reuse existing data — **refresh will NOT wipe bills**.
 
-### Bugs
-1. **GSTIN mandatory** – party form requires valid 15-char GSTIN (client + server)
-2. **First product row empty** – Select2 now initializes after jQuery loads (`initBillFormPage`)
-3. **GSTIN null crash** – safe substring on company GSTIN
-4. **Tax mode** – only intra when both state codes exist and match
-5. **Stock** – logs warning when selling below available stock
-
-### PWA
-- Improved manifest (maskable icons, scope, categories)
-- Stronger service worker (network-first app, cache-first CDN)
-- Apple / Android install meta tags
-- theme-color + standalone display
-
-### Mobile UI
-- Off-canvas sidebar with dark overlay
-- Bottom tab bar: Home | Sales | New Bill | Party | Reports
-- Touch-friendly buttons/inputs (min 42px)
-- Horizontal scroll tables
-- Safe-area support for notched phones
-- Extra bottom padding so content is not hidden behind nav
-
-## Login
-sanjay / patel
+## Security (important)
+You shared a **GitHub token** and **DB password** in chat.
+1. Revoke/rotate the GitHub token now: GitHub → Settings → Developer settings → Personal access tokens
+2. Change the TiDB password in TiDB Cloud console
+3. Never commit `.env` or tokens to git

@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const bodyParser = require('body-parser');
 const session = require('express-session');
@@ -165,6 +166,11 @@ app.get('/lang/:lang', (req, res) => {
 
 app.get('/dashboard', requireAuth, async (req, res) => {
     try {
+        const num = (v) => {
+            const n = Number(v);
+            return Number.isFinite(n) ? n : 0;
+        };
+
         // Query Stats
         const sales = await db.getOne("SELECT COUNT(*) AS count FROM sales_invoices WHERE type = 'Invoice' AND is_draft = 0");
         const purchases = await db.getOne("SELECT COUNT(*) AS count FROM purchase_invoices");
@@ -172,19 +178,32 @@ app.get('/dashboard', requireAuth, async (req, res) => {
         const products = await db.getOne("SELECT COUNT(*) AS count FROM products");
         
         // Outstanding Balances
-        const rec = await db.getOne("SELECT SUM(current_balance) AS total FROM parties WHERE type IN ('Customer', 'Both') AND current_balance > 0");
-        const pay = await db.getOne("SELECT SUM(current_balance) AS total FROM parties WHERE type IN ('Supplier', 'Both') AND current_balance < 0");
+        const rec = await db.getOne("SELECT COALESCE(SUM(current_balance), 0) AS total FROM parties WHERE type IN ('Customer', 'Both') AND current_balance > 0");
+        const pay = await db.getOne("SELECT COALESCE(SUM(current_balance), 0) AS total FROM parties WHERE type IN ('Supplier', 'Both') AND current_balance < 0");
 
         // Recent Invoices lists
-        const recentSales = await db.query(
+        const recentSalesRaw = await db.query(
             "SELECT s.*, p.name AS party_name FROM sales_invoices s JOIN parties p ON s.party_id = p.id ORDER BY s.date DESC, s.id DESC LIMIT 5"
         );
-        const recentPurchases = await db.query(
+        const recentPurchasesRaw = await db.query(
             "SELECT s.*, p.name AS party_name FROM purchase_invoices s JOIN parties p ON s.party_id = p.id ORDER BY s.date DESC, s.id DESC LIMIT 5"
         );
 
-        // Chart Data (Sales per month in active fiscal year)
-        // Group by month
+        // Normalize numeric fields for EJS .toFixed()
+        const recentSales = (recentSalesRaw || []).map(inv => ({
+            ...inv,
+            grand_total: num(inv.grand_total),
+            sub_total: num(inv.sub_total),
+            tax_total: num(inv.tax_total)
+        }));
+        const recentPurchases = (recentPurchasesRaw || []).map(inv => ({
+            ...inv,
+            grand_total: num(inv.grand_total),
+            sub_total: num(inv.sub_total),
+            tax_total: num(inv.tax_total)
+        }));
+
+        // Chart Data (Sales per month) — TiDB/MySQL compatible
         const monthlySales = await db.query(
             "SELECT strftime('%m', date) AS month, SUM(grand_total) AS total FROM sales_invoices WHERE is_draft = 0 GROUP BY month"
         );
@@ -193,19 +212,19 @@ app.get('/dashboard', requireAuth, async (req, res) => {
         const fiscalMonths = ["04", "05", "06", "07", "08", "09", "10", "11", "12", "01", "02", "03"];
         const monthNames = ["Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar"];
         const chartSalesData = fiscalMonths.map(m => {
-            const match = monthlySales.find(s => s.month === m);
-            return match ? match.total : 0;
+            const match = (monthlySales || []).find(s => String(s.month).padStart(2, '0') === m);
+            return match ? num(match.total) : 0;
         });
 
         res.render('dashboard', {
             currentRoute: 'dashboard',
             stats: {
-                salesCount: sales ? sales.count : 0,
-                purchaseCount: purchases ? purchases.count : 0,
-                partiesCount: parties ? parties.count : 0,
-                productsCount: products ? products.count : 0,
-                totalReceivables: rec && rec.total ? rec.total : 0.0,
-                totalPayables: pay && pay.total ? Math.abs(pay.total) : 0.0
+                salesCount: num(sales && sales.count),
+                purchaseCount: num(purchases && purchases.count),
+                partiesCount: num(parties && parties.count),
+                productsCount: num(products && products.count),
+                totalReceivables: num(rec && rec.total),
+                totalPayables: Math.abs(num(pay && pay.total))
             },
             recentSales,
             recentPurchases,
@@ -215,8 +234,8 @@ app.get('/dashboard', requireAuth, async (req, res) => {
             }
         });
     } catch (err) {
-        console.error(err);
-        req.session.error_msg = "Error loading dashboard metrics";
+        console.error('DASHBOARD ERROR:', err);
+        req.session.error_msg = "Error loading dashboard metrics: " + (err.message || String(err));
         res.redirect('/login');
     }
 });

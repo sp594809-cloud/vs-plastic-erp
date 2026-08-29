@@ -1,69 +1,66 @@
-const CACHE_NAME = 'vs-plastic-cache-v2';
+const CACHE_NAME = 'vs-plastic-cache-v3';
 
 const ASSETS_TO_CACHE = [
   '/login',
   '/css/custom-adminlte.css',
   '/manifest.json',
   '/images/icon-192.png',
-  '/images/icon-512.png',
-  'https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap',
-  'https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css',
-  'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css',
-  'https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css',
-  'https://cdn.datatables.net/1.13.5/css/dataTables.bootstrap5.min.css',
-  'https://code.jquery.com/jquery-3.6.0.min.js',
-  'https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js',
-  'https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js',
-  'https://cdn.datatables.net/1.13.5/js/jquery.dataTables.min.js',
-  'https://cdn.datatables.net/1.13.5/js/dataTables.bootstrap5.min.js',
-  'https://cdn.jsdelivr.net/npm/chart.js'
+  '/images/icon-512.png'
 ];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(ASSETS_TO_CACHE).catch((err) => {
-        console.warn('SW partial cache', err);
-      });
-    })
+    caches.open(CACHE_NAME)
+      .then((cache) => cache.addAll(ASSETS_TO_CACHE).catch(() => undefined))
+      .then(() => self.skipWaiting())
   );
-  self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys().then((cacheNames) =>
-      Promise.all(
-        cacheNames.map((cache) => {
-          if (cache !== CACHE_NAME) return caches.delete(cache);
-        })
-      )
-    )
+    caches.keys().then((names) =>
+      Promise.all(names.map((n) => (n !== CACHE_NAME ? caches.delete(n) : undefined)))
+    ).then(() => self.clients.claim())
   );
-  self.clients.claim();
 });
 
-self.addEventListener('fetch', (event) => {
-  if (event.request.method !== 'GET') return;
-  const url = new URL(event.request.url);
+function isCacheableRequest(request) {
+  try {
+    const url = new URL(request.url);
+    // Only http(s). Skip chrome-extension, data:, blob:, etc.
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
+    // Don't cache non-GET
+    if (request.method !== 'GET') return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
 
-  // Network-first for app pages/API
-  if (url.origin === self.location.origin) {
+self.addEventListener('fetch', (event) => {
+  const { request } = event;
+  if (!isCacheableRequest(request)) return;
+
+  const url = new URL(request.url);
+  const sameOrigin = url.origin === self.location.origin;
+
+  // App pages / API: network first, then cache
+  if (sameOrigin) {
     event.respondWith(
-      fetch(event.request)
+      fetch(request)
         .then((response) => {
-          if (response && response.status === 200 && response.type === 'basic') {
+          if (response && response.ok && response.type === 'basic') {
             const clone = response.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+            caches.open(CACHE_NAME).then((cache) => {
+              try { cache.put(request, clone); } catch (_) {}
+            }).catch(() => {});
           }
           return response;
         })
         .catch(() =>
-          caches.match(event.request).then((cached) => {
+          caches.match(request).then((cached) => {
             if (cached) return cached;
-            if (event.request.mode === 'navigate') {
-              return caches.match('/login');
-            }
+            if (request.mode === 'navigate') return caches.match('/login');
             return new Response('Offline', { status: 503, statusText: 'Offline' });
           })
         )
@@ -71,17 +68,22 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Cache-first for CDN assets
+  // CDN / external: cache first, never throw
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      if (cached) return cached;
-      return fetch(event.request).then((response) => {
-        if (response && response.status === 200) {
-          const clone = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
-        }
-        return response;
-      });
-    })
+    caches.match(request).then((cached) => {
+      const networkFetch = fetch(request)
+        .then((response) => {
+          if (response && response.ok) {
+            const clone = response.clone();
+            caches.open(CACHE_NAME).then((cache) => {
+              try { cache.put(request, clone); } catch (_) {}
+            }).catch(() => {});
+          }
+          return response;
+        })
+        .catch(() => cached || new Response('', { status: 504, statusText: 'CDN offline' }));
+
+      return cached || networkFetch;
+    }).catch(() => new Response('', { status: 504, statusText: 'CDN offline' }))
   );
 });
