@@ -1,9 +1,8 @@
-const CACHE_NAME = 'vs-plastic-cache-v3';
-
-const ASSETS_TO_CACHE = [
+const CACHE_NAME = 'vs-plastic-pwa-v4';
+const PRECACHE = [
   '/login',
-  '/css/custom-adminlte.css',
   '/manifest.json',
+  '/css/custom-adminlte.css',
   '/images/icon-192.png',
   '/images/icon-512.png'
 ];
@@ -11,27 +10,24 @@ const ASSETS_TO_CACHE = [
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME)
-      .then((cache) => cache.addAll(ASSETS_TO_CACHE).catch(() => undefined))
+      .then((c) => c.addAll(PRECACHE).catch(() => undefined))
       .then(() => self.skipWaiting())
   );
 });
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys().then((names) =>
-      Promise.all(names.map((n) => (n !== CACHE_NAME ? caches.delete(n) : undefined)))
-    ).then(() => self.clients.claim())
+    caches.keys()
+      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k))))
+      .then(() => self.clients.claim())
   );
 });
 
-function isCacheableRequest(request) {
+function canCache(request) {
+  if (request.method !== 'GET') return false;
   try {
-    const url = new URL(request.url);
-    // Only http(s). Skip chrome-extension, data:, blob:, etc.
-    if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
-    // Don't cache non-GET
-    if (request.method !== 'GET') return false;
-    return true;
+    const u = new URL(request.url);
+    return u.protocol === 'http:' || u.protocol === 'https:';
   } catch {
     return false;
   }
@@ -39,23 +35,20 @@ function isCacheableRequest(request) {
 
 self.addEventListener('fetch', (event) => {
   const { request } = event;
-  if (!isCacheableRequest(request)) return;
+  if (!canCache(request)) return;
 
   const url = new URL(request.url);
   const sameOrigin = url.origin === self.location.origin;
 
-  // App pages / API: network first, then cache
   if (sameOrigin) {
     event.respondWith(
       fetch(request)
-        .then((response) => {
-          if (response && response.ok && response.type === 'basic') {
-            const clone = response.clone();
-            caches.open(CACHE_NAME).then((cache) => {
-              try { cache.put(request, clone); } catch (_) {}
-            }).catch(() => {});
+        .then((res) => {
+          if (res && res.ok && res.type === 'basic') {
+            const clone = res.clone();
+            caches.open(CACHE_NAME).then((c) => { try { c.put(request, clone); } catch (_) {} }).catch(() => {});
           }
-          return response;
+          return res;
         })
         .catch(() =>
           caches.match(request).then((cached) => {
@@ -68,22 +61,19 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // CDN / external: cache first, never throw
+  // CDN: prefer cache, fall back to network, never throw
   event.respondWith(
     caches.match(request).then((cached) => {
-      const networkFetch = fetch(request)
-        .then((response) => {
-          if (response && response.ok) {
-            const clone = response.clone();
-            caches.open(CACHE_NAME).then((cache) => {
-              try { cache.put(request, clone); } catch (_) {}
-            }).catch(() => {});
+      const net = fetch(request)
+        .then((res) => {
+          if (res && res.ok) {
+            const clone = res.clone();
+            caches.open(CACHE_NAME).then((c) => { try { c.put(request, clone); } catch (_) {} }).catch(() => {});
           }
-          return response;
+          return res;
         })
-        .catch(() => cached || new Response('', { status: 504, statusText: 'CDN offline' }));
-
-      return cached || networkFetch;
-    }).catch(() => new Response('', { status: 504, statusText: 'CDN offline' }))
+        .catch(() => cached || new Response('', { status: 504 }));
+      return cached || net;
+    }).catch(() => new Response('', { status: 504 }))
   );
 });

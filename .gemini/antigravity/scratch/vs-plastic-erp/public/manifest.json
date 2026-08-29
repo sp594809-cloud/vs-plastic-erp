@@ -1,39 +1,70 @@
 {
+  "id": "/",
   "name": "VS Plastic ERP",
   "short_name": "VS Plastic",
-  "description": "Billing, GST invoicing and inventory management for VS Plastic",
+  "description": "GST billing, sales, purchase and stock for VS Plastic",
   "start_url": "/dashboard",
   "scope": "/",
   "display": "standalone",
-  "orientation": "any",
+  "display_override": ["standalone", "minimal-ui"],
+  "orientation": "portrait-primary",
   "background_color": "#1a252f",
   "theme_color": "#1a252f",
   "lang": "en",
+  "dir": "ltr",
   "categories": ["business", "finance", "productivity"],
+  "prefer_related_applications": false,
   "icons": [
     {
       "src": "/images/icon-192.png",
-      "type": "image/png",
       "sizes": "192x192",
+      "type": "image/png",
       "purpose": "any"
     },
     {
       "src": "/images/icon-512.png",
-      "type": "image/png",
       "sizes": "512x512",
+      "type": "image/png",
       "purpose": "any"
     },
     {
       "src": "/images/icon-192.png",
-      "type": "image/png",
       "sizes": "192x192",
+      "type": "image/png",
       "purpose": "maskable"
     },
     {
       "src": "/images/icon-512.png",
-      "type": "image/png",
       "sizes": "512x512",
+      "type": "image/png",
       "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "New Sales Bill",
+      "short_name": "New Bill",
+      "description": "Create a new sales invoice",
+      "url": "/sales/bill/add",
+      "icons": [{ "src": "/images/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Sales Bills",
+      "short_name": "Sales",
+      "url": "/sales/bill",
+      "icons": [{ "src": "/images/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Parties",
+      "short_name": "Parties",
+      "url": "/master/party",
+      "icons": [{ "src": "/images/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Reports",
+      "short_name": "Reports",
+      "url": "/reports",
+      "icons": [{ "src": "/images/icon-192.png", "sizes": "192x192" }]
     }
   ]
 }

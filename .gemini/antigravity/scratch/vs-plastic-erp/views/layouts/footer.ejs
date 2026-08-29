@@ -13,16 +13,16 @@
 <!-- Mobile bottom navigation (PWA / phone) -->
 <nav class="mobile-bottom-nav no-print" aria-label="Mobile primary">
     <a href="/dashboard" class="<%= typeof currentRoute !== 'undefined' && currentRoute === 'dashboard' ? 'active' : '' %>">
-        <i class="fa-solid fa-chart-line"></i>
+        <i class="fa-solid fa-house"></i>
         <span>Home</span>
     </a>
-    <a href="/sales/bill" class="<%= typeof currentRoute !== 'undefined' && (currentRoute === 'sales-bill' || currentRoute === 'sales-challan') ? 'active' : '' %>">
+    <a href="/sales/bill" class="<%= typeof currentRoute !== 'undefined' && currentRoute === 'sales-bill' ? 'active' : '' %>">
         <i class="fa-solid fa-file-invoice-dollar"></i>
         <span>Sales</span>
     </a>
-    <a href="/sales/bill/add" class="<%= typeof currentRoute !== 'undefined' && currentRoute === 'sales-bill' ? '' : '' %>">
-        <i class="fa-solid fa-plus-circle"></i>
-        <span>New Bill</span>
+    <a href="/sales/bill/add" class="nav-fab">
+        <i class="fa-solid fa-plus"></i>
+        <span>Bill</span>
     </a>
     <a href="/master/party" class="<%= typeof currentRoute !== 'undefined' && currentRoute === 'master-party' ? 'active' : '' %>">
         <i class="fa-solid fa-users"></i>
@@ -33,6 +33,13 @@
         <span>Reports</span>
     </a>
 </nav>
+
+<!-- Optional install banner (shown via JS when installable) -->
+<div id="pwaInstallBanner" class="pwa-install-banner no-print">
+    <p><strong>Install VS Plastic</strong><br>Add to Home Screen for quick access</p>
+    <button type="button" class="btn btn-sm btn-light" id="pwaInstallBtn">Install</button>
+    <button type="button" class="btn btn-sm btn-outline-light" id="pwaInstallDismiss" aria-label="Dismiss">&times;</button>
+</div>
 
 <!-- Scripts -->
 <!-- jQuery -->
@@ -126,6 +133,29 @@
     $(document).on('click', '#sidebar-overlay', function() {
         $('#sidebar-wrapper').addClass('collapsed');
         $('#sidebar-overlay').removeClass('show');
+    });
+
+    
+    // PWA install prompt
+    let deferredInstallPrompt = null;
+    window.addEventListener('beforeinstallprompt', (e) => {
+        e.preventDefault();
+        deferredInstallPrompt = e;
+        const banner = document.getElementById('pwaInstallBanner');
+        if (banner && !localStorage.getItem('pwaInstallDismissed')) {
+            banner.classList.add('show');
+        }
+    });
+    document.getElementById('pwaInstallBtn')?.addEventListener('click', async () => {
+        if (!deferredInstallPrompt) return;
+        deferredInstallPrompt.prompt();
+        await deferredInstallPrompt.userChoice;
+        deferredInstallPrompt = null;
+        document.getElementById('pwaInstallBanner')?.classList.remove('show');
+    });
+    document.getElementById('pwaInstallDismiss')?.addEventListener('click', () => {
+        localStorage.setItem('pwaInstallDismissed', '1');
+        document.getElementById('pwaInstallBanner')?.classList.remove('show');
     });
 
     // PWA Service Worker Registration
