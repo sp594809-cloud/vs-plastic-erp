@@ -1,8 +1,13 @@
 <!-- Sidebar -->
 <div id="sidebar-wrapper" class="no-print">
-    <div class="sidebar-heading">
-        <i class="fa-solid fa-industry me-2"></i>
-        <span>VS Plastic</span>
+    <div class="sidebar-heading d-flex align-items-center justify-content-between">
+        <div class="d-flex align-items-center">
+            <i class="fa-solid fa-industry me-2"></i>
+            <span>VS Plastic</span>
+        </div>
+        <button type="button" class="btn btn-sm btn-outline-light d-lg-none sidebar-close-btn" id="sidebar-close" aria-label="Close menu">
+            <i class="fa-solid fa-xmark"></i>
+        </button>
     </div>
     
     <div class="sidebar-menu">
@@ -148,8 +153,9 @@
     <!-- Navbar -->
     <nav class="navbar navbar-expand-lg top-navbar no-print">
         <div class="container-fluid">
-            <button class="btn btn-outline-secondary me-3" id="menu-toggle">
+            <button class="btn btn-primary menu-toggle-btn me-2" id="menu-toggle" type="button" aria-label="Open full menu">
                 <i class="fa-solid fa-bars"></i>
+                <span class="menu-toggle-label d-none d-sm-inline ms-1">Menu</span>
             </button>
             
             <div class="navbar-brand"><%= companyName || 'VS Plastic' %></div>

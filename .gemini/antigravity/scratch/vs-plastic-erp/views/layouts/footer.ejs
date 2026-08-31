@@ -28,9 +28,9 @@
         <i class="fa-solid fa-users"></i>
         <span>Party</span>
     </a>
-    <a href="/reports" class="<%= typeof currentRoute !== 'undefined' && currentRoute === 'reports' ? 'active' : '' %>">
-        <i class="fa-solid fa-chart-pie"></i>
-        <span>Reports</span>
+    <a href="#" id="bottom-nav-more" role="button">
+        <i class="fa-solid fa-bars"></i>
+        <span>More</span>
     </a>
 </nav>
 
@@ -65,16 +65,8 @@
 <!-- Menu Toggle & Bootstrap Toast Initialization -->
 <script>
     $(document).ready(function() {
-        // Phone: start with sidebar closed
-        if (window.matchMedia('(max-width: 991.98px)').matches) {
-            $('#sidebar-wrapper').addClass('collapsed');
-        }
 
-        // Toggle Sidebar
-        $("#menu-toggle").click(function(e) {
-            e.preventDefault();
-            $("#sidebar-wrapper").toggleClass("collapsed");
-        });
+        // Sidebar toggle handled in mobileMenu handlers below
 
         // Initialize Select2 dropdowns
         $('.select2').select2({
@@ -118,21 +110,39 @@
     });
 
     
-    // Mobile sidebar overlay close on link click
-    $(document).on('click', '#sidebar-wrapper .nav-link', function() {
-        if (window.innerWidth < 992) {
-            $('#sidebar-wrapper').addClass('collapsed');
-            $('#sidebar-overlay').removeClass('show');
-        }
-    });
-    $('#menu-toggle').off('click').on('click', function(e) {
-        e.preventDefault();
-        $('#sidebar-wrapper').toggleClass('collapsed');
-        $('#sidebar-overlay').toggleClass('show');
-    });
-    $(document).on('click', '#sidebar-overlay', function() {
+    // ===== Mobile full menu (hamburger + More) =====
+    function openMobileMenu() {
+        $('#sidebar-wrapper').removeClass('collapsed');
+        $('#sidebar-overlay').addClass('show');
+        $('body').addClass('sidebar-open');
+    }
+    function closeMobileMenu() {
         $('#sidebar-wrapper').addClass('collapsed');
         $('#sidebar-overlay').removeClass('show');
+        $('body').removeClass('sidebar-open');
+    }
+    function toggleMobileMenu() {
+        if ($('#sidebar-wrapper').hasClass('collapsed')) openMobileMenu();
+        else closeMobileMenu();
+    }
+
+    // Start closed on phone
+    if (window.matchMedia('(max-width: 991.98px)').matches) {
+        closeMobileMenu();
+    }
+
+    $(document).off('click.mobileMenu');
+    $(document).on('click.mobileMenu', '#menu-toggle, #bottom-nav-more', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        toggleMobileMenu();
+    });
+    $(document).on('click.mobileMenu', '#sidebar-close, #sidebar-overlay', function(e) {
+        e.preventDefault();
+        closeMobileMenu();
+    });
+    $(document).on('click.mobileMenu', '#sidebar-wrapper .nav-link', function() {
+        if (window.innerWidth < 992) closeMobileMenu();
     });
 
     
