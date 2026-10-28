@@ -5,3 +5,10 @@ node_modules/
 *.db
 .DS_Store
 npm-debug.log*
+
+# New wholesale development databases and logs
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.log

@@ -1,1769 +1,1208 @@
-require('dotenv').config();
-const express = require('express');
-const bodyParser = require('body-parser');
-const session = require('express-session');
-const path = require('path');
-const fs = require('fs');
-
-const db = require('./db/connection');
-const translate = require('./utils/translate');
-const numberToWords = require('./utils/numberToWords');
-
-// GSTIN validation (15 chars Indian GST format)
-function isValidGstin(gstin) {
-    if (!gstin || typeof gstin !== 'string') return false;
-    const g = gstin.trim().toUpperCase();
-    return /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/.test(g);
-}
-
+const path = require("node:path");
+require("dotenv").config({ path: path.join(__dirname, ".env"), quiet: true });
+const express = require("express"),
+  crypto = require("node:crypto");
+const db = require("./wholesale/database"),
+  d = require("./wholesale/domain");
 const app = express();
-const PORT = process.env.PORT || 3001;
-
-// Set up templating & static files
-app.set('view engine', 'ejs');
-app.set('views', path.join(__dirname, 'views'));
-app.use(express.static(path.join(__dirname, 'public')));
-
-// Explicit PWA asset routes (reliable on all hosts)
-app.get('/manifest.json', (req, res) => {
-    res.type('application/manifest+json');
-    res.sendFile(path.join(__dirname, 'public', 'manifest.json'));
+const production = process.env.NODE_ENV === "production";
+const secret =
+  process.env.SESSION_SECRET ||
+  (!production && crypto.randomBytes(32).toString("hex"));
+if (!secret || secret.length < 32)
+  throw new Error(
+    "Set SESSION_SECRET to a random secret of at least 32 characters.",
+  );
+app.disable("x-powered-by");
+if (process.env.TRUST_PROXY === "1") app.set("trust proxy", 1);
+app.set("view engine", "ejs");
+app.set("views", path.join(__dirname, "views", "wholesale"));
+app.use(
+  "/admin/products/:id/image",
+  express.raw({
+    type: ["image/png", "image/jpeg", "image/webp"],
+    limit: "2mb",
+  }),
+);
+app.use(express.urlencoded({ extended: false, limit: "32kb" }));
+app.use((req, res, next) => {
+  res.set({
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Content-Security-Policy":
+      "default-src 'self'; img-src 'self' https: data:; style-src 'self'; script-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'self'",
+  });
+  if (production) res.set("Strict-Transport-Security", "max-age=31536000");
+  next();
 });
-app.get('/service-worker.js', (req, res) => {
-    res.type('application/javascript');
-    res.set('Service-Worker-Allowed', '/');
-    res.set('Cache-Control', 'no-cache');
-    res.sendFile(path.join(__dirname, 'public', 'service-worker.js'));
-});
-
-
-app.use(bodyParser.urlencoded({ extended: true }));
-app.use(bodyParser.json());
-
-// Session config
-app.use(session({
-    secret: 'vsplastic_secret_key_12345',
-    resave: false,
-    saveUninitialized: true,
-    cookie: { maxAge: 24 * 60 * 60 * 1000 } // 24 hours
-}));
-
-// Shared view locals & translation middleware
-app.use(async (req, res, next) => {
-    // Current language (default 'en')
-    const lang = req.session.lang || 'en';
-    res.locals.currentLang = lang;
-    res.locals.__ = translate(lang);
-    
-    // User login session info
-    res.locals.username = req.session.user ? req.session.user.username : '';
-    res.locals.userRole = req.session.user ? req.session.user.role : '';
-    
-    // Retrieve default active company name & fiscal year info
-    try {
-        const company = await db.getOne("SELECT name, gstin FROM companies LIMIT 1");
-        res.locals.companyName = company ? company.name : 'VS Plastic';
-        
-        const year = await db.getOne("SELECT name FROM financial_years WHERE is_active = 1 LIMIT 1");
-        res.locals.activeYear = year ? year.name : '2026-2027';
-    } catch (err) {
-        res.locals.companyName = 'VS Plastic';
-        res.locals.activeYear = '2026-2027';
+app.use(
+  "/wholesale",
+  express.static(path.join(__dirname, "public", "wholesale")),
+);
+app.get("/service-worker.js", (req, res) =>
+  res
+    .set("Cache-Control", "no-cache")
+    .sendFile(path.join(__dirname, "public", "service-worker.js")),
+);
+app.get("/manifest.json", (req, res) =>
+  res.sendFile(path.join(__dirname, "public", "manifest.json")),
+);
+app.get("/health", (req, res) => res.json({ status: "ok" }));
+const wrap = (fn) => (req, res, next) =>
+  Promise.resolve(fn(req, res, next)).catch(next);
+function cookie(req, name) {
+  const value = (req.headers.cookie || "")
+    .split(";")
+    .map((x) => x.trim())
+    .find((x) => x.startsWith(name + "="));
+  return value?.slice(name.length + 1);
+}
+const digest = (x) => crypto.createHash("sha256").update(x).digest("hex");
+const sign = (x) => crypto.createHmac("sha256", secret).update(x).digest("hex");
+const opts = { httpOnly: true, secure: production, sameSite: "lax", path: "/" };
+const fmt = (n) =>
+  n === null || n === undefined
+    ? "To be confirmed"
+    : new Intl.NumberFormat("en-IN", {
+        style: "currency",
+        currency: "INR",
+      }).format(n / 100);
+app.use(
+  wrap(async (req, res, next) => {
+    res.set("Cache-Control", "no-store");
+    const token = cookie(req, "vs_session");
+    req.user = null;
+    if (token && /^[a-f0-9]{64}$/.test(token))
+      req.user = await db.one(
+        "SELECT u.* FROM w_sessions s JOIN w_users u ON u.id=s.user_id WHERE s.id=? AND s.expires>?",
+        [digest(token), Date.now()],
+      );
+    if (req.user && req.user.status === "suspended") req.user = null;
+    let csrf = cookie(req, "vs_csrf");
+    if (
+      !csrf ||
+      !/^([a-f0-9]{48})\.([a-f0-9]{64})$/.test(csrf) ||
+      sign(csrf.split(".")[0]) !== csrf.split(".")[1]
+    ) {
+      const value = crypto.randomBytes(24).toString("hex");
+      csrf = value + "." + sign(value);
+      res.cookie("vs_csrf", csrf, opts);
     }
-
-    // Default notifications messages
-    res.locals.success_msg = req.session.success_msg || null;
-    res.locals.error_msg = req.session.error_msg || null;
-    delete req.session.success_msg;
-    delete req.session.error_msg;
-    
+    if (
+      req.method === "POST" &&
+      (req.body?.csrf || req.get("X-CSRF-Token")) !== csrf
+    )
+      d.fail("Your form expired. Reload the page and try again.", 403);
+    req.settings = JSON.parse(
+      (await db.one("SELECT data FROM w_settings WHERE id=1")).data,
+    );
+    res.locals = {
+      ...res.locals,
+      user: req.user,
+      settings: req.settings,
+      csrf,
+      fmt,
+      path: req.path,
+      title: "Wholesale curtain accessories",
+      message: req.query.notice || "",
+      error: "",
+      categories: await db.all("SELECT * FROM w_categories ORDER BY id"),
+      wa: (message) =>
+        req.settings.whatsapp
+          ? "https://wa.me/" +
+            req.settings.whatsapp.replace(/\D/g, "") +
+            "?text=" +
+            encodeURIComponent(message)
+          : "/contact",
+    };
     next();
-});
-
-// Route-level authentication guard
-const requireAuth = (req, res, next) => {
-    if (!req.session.user) {
-        return res.redirect('/login');
-    }
-    next();
+  }),
+);
+const login = (req, res, next) => (req.user ? next() : res.redirect("/login"));
+const approved = (req, res, next) => {
+  if (!req.user) return res.redirect("/login");
+  if (req.user.status !== "approved")
+    return next(
+      Object.assign(
+        new Error(
+          "Your business account is awaiting approval. Contact our team for assistance.",
+        ),
+        { status: 403 },
+      ),
+    );
+  next();
 };
-
-// State list constant helper
-const STATES_LIST = [
-    { name: "Andhra Pradesh", code: "37" },
-    { name: "Arunachal Pradesh", code: "12" },
-    { name: "Assam", code: "18" },
-    { name: "Bihar", code: "10" },
-    { name: "Chhattisgarh", code: "22" },
-    { name: "Goa", code: "30" },
-    { name: "Gujarat", code: "24" },
-    { name: "Haryana", code: "06" },
-    { name: "Himachal Pradesh", code: "02" },
-    { name: "Jharkhand", code: "20" },
-    { name: "Karnataka", code: "29" },
-    { name: "Kerala", code: "32" },
-    { name: "Madhya Pradesh", code: "23" },
-    { name: "Maharashtra", code: "27" },
-    { name: "Manipur", code: "14" },
-    { name: "Meghalaya", code: "17" },
-    { name: "Mizoram", code: "15" },
-    { name: "Nagaland", code: "13" },
-    { name: "Odisha", code: "21" },
-    { name: "Punjab", code: "03" },
-    { name: "Rajasthan", code: "08" },
-    { name: "Sikkim", code: "11" },
-    { name: "Tamil Nadu", code: "33" },
-    { name: "Telangana", code: "36" },
-    { name: "Tripura", code: "16" },
-    { name: "Uttar Pradesh", code: "09" },
-    { name: "Uttarakhand", code: "05" },
-    { name: "West Bengal", code: "19" },
-    { name: "Andaman & Nicobar Islands", code: "35" },
-    { name: "Chandigarh", code: "04" },
-    { name: "Dadra & Nagar Haveli", code: "26" },
-    { name: "Daman & Diu", code: "25" },
-    { name: "Delhi", code: "07" },
-    { name: "Jammu & Kashmir", code: "01" },
-    { name: "Lakshadweep", code: "31" },
-    { name: "Puducherry", code: "34" }
-];
-
-// ==========================================
-// 1. AUTHENTICATION ROUTES
-// ==========================================
-
-app.get('/', (req, res) => {
-    if (req.session.user) {
-        res.redirect('/dashboard');
-    } else {
-        res.redirect('/login');
+const admin = (req, res, next) =>
+  req.user?.role === "admin"
+    ? next()
+    : next(
+        Object.assign(new Error("Administrator access required."), {
+          status: 403,
+        }),
+      );
+const redirect = (res, to, msg) =>
+  res.redirect(to + "?notice=" + encodeURIComponent(msg));
+const limits = new Map();
+function rate(req, res, next) {
+  const key = req.ip;
+  const current = limits.get(key) || { count: 0, until: Date.now() + 900000 };
+  if (Date.now() > current.until) {
+    current.count = 0;
+    current.until = Date.now() + 900000;
+  }
+  current.count++;
+  limits.set(key, current);
+  if (limits.size > 10000)
+    for (const [k, v] of limits) if (v.until < Date.now()) limits.delete(k);
+  if (current.count > 20)
+    return next(
+      Object.assign(new Error("Too many attempts. Try again in 15 minutes."), {
+        status: 429,
+      }),
+    );
+  next();
+}
+function business(body) {
+  const b = {};
+  for (const [key, max] of Object.entries({
+    business: 160,
+    contact: 100,
+    phone: 20,
+    business_type: 60,
+    city: 100,
+    state: 100,
+    pincode: 6,
+    address: 1500,
+  }))
+    b[key] = d.field(body[key], key.replaceAll("_", " "), max);
+  if (!/^[6-9]\d{9}$/.test(b.phone))
+    d.fail("Enter a valid 10-digit Indian mobile number.");
+  if (!/^[1-9]\d{5}$/.test(b.pincode))
+    d.fail("Enter a valid six-digit PIN code.");
+  b.gstin = String(body.gstin || "")
+    .trim()
+    .toUpperCase();
+  if (b.gstin && !/^\d{2}[A-Z]{5}\d{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/.test(b.gstin))
+    d.fail("Enter a valid GSTIN or leave it empty.");
+  return b;
+}
+app.get(
+  "/",
+  wrap(async (req, res) =>
+    res.render("home", {
+      products: await db.all(
+        "SELECT * FROM w_products WHERE active=1 AND featured=1 LIMIT 6",
+      ),
+    }),
+  ),
+);
+app.get("/categories", (req, res) => res.render("categories"));
+app.get(
+  "/products",
+  wrap(async (req, res) => {
+    let sql =
+        "SELECT p.*,c.name AS category FROM w_products p JOIN w_categories c ON c.id=p.category_id WHERE p.active=1",
+      params = [];
+    if (req.query.q) {
+      sql +=
+        " AND (p.name LIKE ? OR p.sku LIKE ? OR p.material LIKE ? OR p.variant LIKE ?)";
+      params.push(
+        ...Array(4).fill("%" + String(req.query.q).slice(0, 100) + "%"),
+      );
     }
-});
-
-app.get('/login', (req, res) => {
-    res.render('login', { error_msg: res.locals.error_msg });
-});
-
-app.post('/login', async (req, res) => {
-    const { username, password } = req.body;
-    try {
-        const user = await db.getOne("SELECT * FROM users WHERE username = ? AND password = ?", [username, password]);
-        if (user) {
-            req.session.user = { id: user.id, username: user.username, role: user.role };
-            req.session.success_msg = "Successfully logged in!";
-            res.redirect('/dashboard');
-        } else {
-            res.render('login', { error_msg: "Invalid username or password!" });
-        }
-    } catch (err) {
-        res.render('login', { error_msg: "Database connection error." });
+    if (req.query.category) {
+      sql += " AND p.category_id=?";
+      params.push(d.integer(req.query.category, 1));
     }
-});
-
-app.get('/logout', (req, res) => {
-    req.session.destroy(() => {
-        res.redirect('/login');
+    if (req.query.available === "1") sql += " AND p.stock>p.reserved";
+    sql += " ORDER BY p.name";
+    let products = await db.all(sql, params);
+    if (req.user?.status === "approved")
+      for (const p of products)
+        p.quoted = await d.priceFor(db, p, req.user, p.moq);
+    if (req.query.sort === "price" && req.user?.status === "approved")
+      products.sort((a, b) => (a.quoted ?? Infinity) - (b.quoted ?? Infinity));
+    if (req.query.sort === "newest") products.sort((a, b) => b.id - a.id);
+    res.render("products", { products, query: req.query });
+  }),
+);
+app.get(
+  "/products/:slug",
+  wrap(async (req, res) => {
+    const p = await db.one(
+      "SELECT * FROM w_products WHERE slug=? AND active=1",
+      [req.params.slug],
+    );
+    if (!p) d.fail("Product not found.", 404);
+    if (req.user?.status === "approved")
+      p.quoted = await d.priceFor(db, p, req.user, p.moq);
+    res.render("product", { p, title: p.name });
+  }),
+);
+app.get("/register", (req, res) => res.render("auth", { register: true }));
+app.get("/login", (req, res) => res.render("auth", { register: false }));
+app.post(
+  "/register",
+  rate,
+  wrap(async (req, res) => {
+    const b = business(req.body),
+      email = d.field(req.body.email, "email", 254).toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+      d.fail("Enter a valid email address.");
+    const password = await d.hash(req.body.password);
+    if (await db.one("SELECT id FROM w_users WHERE email=?", [email]))
+      d.fail(
+        "Unable to register this email. Try signing in or contact support.",
+      );
+    await db.run(
+      "INSERT INTO w_users (email,password,business,contact,phone,business_type,city,state,pincode,address,gstin,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+      [email, password, ...Object.values(b), d.now()],
+    );
+    redirect(
+      res,
+      "/login",
+      "Registration received. Sign in to check your approval status.",
+    );
+  }),
+);
+app.post(
+  "/login",
+  rate,
+  wrap(async (req, res) => {
+    const user = await db.one("SELECT * FROM w_users WHERE email=?", [
+      String(req.body.email || "")
+        .trim()
+        .toLowerCase(),
+    ]);
+    if (
+      !user ||
+      !(await d.verify(req.body.password, user.password)) ||
+      user.status === "suspended" ||
+      user.status === "rejected"
+    )
+      d.fail("Invalid credentials or account unavailable.", 401);
+    const token = crypto.randomBytes(32).toString("hex");
+    await db.run("DELETE FROM w_sessions WHERE expires<?", [Date.now()]);
+    await db.run("INSERT INTO w_sessions (id,user_id,expires) VALUES (?,?,?)", [
+      digest(token),
+      user.id,
+      Date.now() + 86400000,
+    ]);
+    res.cookie("vs_session", token, { ...opts, maxAge: 86400000 });
+    res.redirect(user.role === "admin" ? "/admin" : "/account");
+  }),
+);
+app.post(
+  "/logout",
+  wrap(async (req, res) => {
+    await db.run("DELETE FROM w_sessions WHERE id=?", [
+      digest(cookie(req, "vs_session") || ""),
+    ]);
+    res.clearCookie("vs_session", opts);
+    res.redirect("/");
+  }),
+);
+app.get(
+  "/account",
+  login,
+  wrap(async (req, res) =>
+    res.render("account", {
+      addresses: await db.all("SELECT * FROM w_addresses WHERE user_id=?", [
+        req.user.id,
+      ]),
+    }),
+  ),
+);
+app.post(
+  "/account",
+  login,
+  wrap(async (req, res) => {
+    const b = business(req.body);
+    await db.run(
+      "UPDATE w_users SET business=?,contact=?,phone=?,business_type=?,city=?,state=?,pincode=?,address=?,gstin=? WHERE id=?",
+      [...Object.values(b), req.user.id],
+    );
+    redirect(res, "/account", "Business details updated.");
+  }),
+);
+app.post(
+  "/account/password",
+  login,
+  rate,
+  wrap(async (req, res) => {
+    if (!(await d.verify(req.body.current, req.user.password)))
+      d.fail("Current password is incorrect.");
+    const password = await d.hash(req.body.password);
+    await db.transaction(async (tx) => {
+      await tx.run("UPDATE w_users SET password=? WHERE id=?", [
+        password,
+        req.user.id,
+      ]);
+      await tx.run("DELETE FROM w_sessions WHERE user_id=?", [req.user.id]);
     });
-});
-
-app.get('/lang/:lang', (req, res) => {
-    const lang = req.params.lang;
-    if (['en', 'gu'].includes(lang)) {
-        req.session.lang = lang;
+    res.clearCookie("vs_session", opts);
+    redirect(res, "/login", "Password changed. Please sign in again.");
+  }),
+);
+app.post(
+  "/addresses",
+  login,
+  wrap(async (req, res) => {
+    await db.run(
+      "INSERT INTO w_addresses (user_id,label,address) VALUES (?,?,?)",
+      [
+        req.user.id,
+        d.field(req.body.label, "label", 100),
+        d.field(req.body.address, "complete delivery address", 2000),
+      ],
+    );
+    redirect(res, "/account", "Address saved.");
+  }),
+);
+app.post(
+  "/addresses/:id/delete",
+  login,
+  wrap(async (req, res) => {
+    await db.run("DELETE FROM w_addresses WHERE id=? AND user_id=?", [
+      d.integer(req.params.id, 1),
+      req.user.id,
+    ]);
+    res.redirect("/account");
+  }),
+);
+app.get(
+  "/saved",
+  login,
+  wrap(async (req, res) =>
+    res.render("products", {
+      products: await db.all(
+        "SELECT p.* FROM w_saved s JOIN w_products p ON p.id=s.product_id WHERE s.user_id=? AND p.active=1",
+        [req.user.id],
+      ),
+      query: {},
+      title: "Saved products",
+    }),
+  ),
+);
+app.post(
+  "/saved/:id",
+  login,
+  wrap(async (req, res) => {
+    const id = d.integer(req.params.id, 1);
+    if (
+      await db.one("SELECT * FROM w_saved WHERE user_id=? AND product_id=?", [
+        req.user.id,
+        id,
+      ])
+    )
+      await db.run("DELETE FROM w_saved WHERE user_id=? AND product_id=?", [
+        req.user.id,
+        id,
+      ]);
+    else
+      await db.run("INSERT INTO w_saved (user_id,product_id) VALUES (?,?)", [
+        req.user.id,
+        id,
+      ]);
+    redirect(res, "/saved", "Saved products updated.");
+  }),
+);
+app.get(
+  "/cart",
+  approved,
+  wrap(async (req, res) =>
+    res.render("cart", {
+      cart: await d.cart(db, req.user),
+      addresses: await db.all("SELECT * FROM w_addresses WHERE user_id=?", [
+        req.user.id,
+      ]),
+    }),
+  ),
+);
+app.post(
+  "/cart",
+  approved,
+  wrap(async (req, res) => {
+    const id = d.integer(req.body.product_id, 1),
+      qty = d.integer(req.body.qty, 0, 1000000);
+    if (!qty) {
+      await db.run("DELETE FROM w_cart WHERE user_id=? AND product_id=?", [
+        req.user.id,
+        id,
+      ]);
+      return res.redirect("/cart");
     }
-    res.redirect('back');
-});
-
-// ==========================================
-// 2. DASHBOARD ROUTE
-// ==========================================
-
-app.get('/dashboard', requireAuth, async (req, res) => {
-    try {
-        const num = (v) => {
-            const n = Number(v);
-            return Number.isFinite(n) ? n : 0;
-        };
-
-        // Query Stats
-        const sales = await db.getOne("SELECT COUNT(*) AS count FROM sales_invoices WHERE type = 'Invoice' AND is_draft = 0");
-        const purchases = await db.getOne("SELECT COUNT(*) AS count FROM purchase_invoices");
-        const parties = await db.getOne("SELECT COUNT(*) AS count FROM parties");
-        const products = await db.getOne("SELECT COUNT(*) AS count FROM products");
-        
-        // Outstanding Balances
-        const rec = await db.getOne("SELECT COALESCE(SUM(current_balance), 0) AS total FROM parties WHERE type IN ('Customer', 'Both') AND current_balance > 0");
-        const pay = await db.getOne("SELECT COALESCE(SUM(current_balance), 0) AS total FROM parties WHERE type IN ('Supplier', 'Both') AND current_balance < 0");
-
-        // Recent Invoices lists
-        const recentSalesRaw = await db.query(
-            "SELECT s.*, p.name AS party_name FROM sales_invoices s JOIN parties p ON s.party_id = p.id ORDER BY s.date DESC, s.id DESC LIMIT 5"
+    const p = await db.one("SELECT * FROM w_products WHERE id=? AND active=1", [
+      id,
+    ]);
+    if (!p) d.fail("Product is no longer available.");
+    if (qty < p.moq || (qty - p.moq) % p.step)
+      d.fail(`Minimum quantity is ${p.moq}, with increments of ${p.step}.`);
+    await db.transaction(async (tx) => {
+      await tx.run("DELETE FROM w_cart WHERE user_id=? AND product_id=?", [
+        req.user.id,
+        id,
+      ]);
+      await tx.run(
+        "INSERT INTO w_cart (user_id,product_id,qty) VALUES (?,?,?)",
+        [req.user.id, id, qty],
+      );
+    });
+    res.redirect("/cart");
+  }),
+);
+app.post(
+  "/orders",
+  approved,
+  wrap(async (req, res) => {
+    const id = await d.submit(
+      db,
+      req.user,
+      d.field(req.body.address, "delivery address", 2000),
+      req.settings.minimum || 0,
+    );
+    redirect(
+      res,
+      "/orders/" + id,
+      "Your wholesale order request has been received. Our team will contact you to confirm availability, shipping and payment details.",
+    );
+  }),
+);
+app.get(
+  "/orders",
+  login,
+  wrap(async (req, res) =>
+    res.render("orders", {
+      orders: await db.all(
+        "SELECT * FROM w_orders WHERE user_id=? ORDER BY id DESC",
+        [req.user.id],
+      ),
+      adminView: false,
+    }),
+  ),
+);
+async function orderData(req) {
+  const id = d.integer(req.params.id, 1);
+  const o = await db.one(
+    "SELECT o.*,u.business,u.contact,u.phone,u.email FROM w_orders o JOIN w_users u ON u.id=o.user_id WHERE o.id=?",
+    [id],
+  );
+  if (!o || (req.user.role !== "admin" && o.user_id !== req.user.id))
+    d.fail("Order not found.", 404);
+  return {
+    o,
+    items: await db.all("SELECT * FROM w_order_items WHERE order_id=?", [id]),
+    history: await db.all(
+      "SELECT * FROM w_history WHERE order_id=? ORDER BY id",
+      [id],
+    ),
+    shipping: await db.one("SELECT * FROM w_shipping WHERE order_id=?", [id]),
+    payments: await db.all("SELECT * FROM w_payments WHERE order_id=?", [id]),
+    transitions: d.transitions[o.status] || [],
+  };
+}
+app.get(
+  "/orders/:id",
+  login,
+  wrap(async (req, res) => res.render("order", await orderData(req))),
+);
+app.post(
+  "/orders/:id/reorder",
+  approved,
+  wrap(async (req, res) => {
+    const { items } = await orderData(req);
+    let skipped = 0;
+    await db.transaction(async (tx) => {
+      for (const item of items) {
+        const p = await tx.one(
+          "SELECT * FROM w_products WHERE id=? AND active=1",
+          [item.product_id],
         );
-        const recentPurchasesRaw = await db.query(
-            "SELECT s.*, p.name AS party_name FROM purchase_invoices s JOIN parties p ON s.party_id = p.id ORDER BY s.date DESC, s.id DESC LIMIT 5"
-        );
-
-        // Normalize numeric fields for EJS .toFixed()
-        const recentSales = (recentSalesRaw || []).map(inv => ({
-            ...inv,
-            grand_total: num(inv.grand_total),
-            sub_total: num(inv.sub_total),
-            tax_total: num(inv.tax_total)
-        }));
-        const recentPurchases = (recentPurchasesRaw || []).map(inv => ({
-            ...inv,
-            grand_total: num(inv.grand_total),
-            sub_total: num(inv.sub_total),
-            tax_total: num(inv.tax_total)
-        }));
-
-        // Chart Data (Sales per month) — TiDB/MySQL compatible
-        const monthlySales = await db.query(
-            "SELECT strftime('%m', date) AS month, SUM(grand_total) AS total FROM sales_invoices WHERE is_draft = 0 GROUP BY month"
-        );
-
-        // Map values to standard fiscal year (Apr to Mar)
-        const fiscalMonths = ["04", "05", "06", "07", "08", "09", "10", "11", "12", "01", "02", "03"];
-        const monthNames = ["Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar"];
-        const chartSalesData = fiscalMonths.map(m => {
-            const match = (monthlySales || []).find(s => String(s.month).padStart(2, '0') === m);
-            return match ? num(match.total) : 0;
-        });
-
-        res.render('dashboard', {
-            currentRoute: 'dashboard',
-            stats: {
-                salesCount: num(sales && sales.count),
-                purchaseCount: num(purchases && purchases.count),
-                partiesCount: num(parties && parties.count),
-                productsCount: num(products && products.count),
-                totalReceivables: num(rec && rec.total),
-                totalPayables: Math.abs(num(pay && pay.total))
-            },
-            recentSales,
-            recentPurchases,
-            chartData: {
-                labels: monthNames,
-                sales: chartSalesData
-            }
-        });
-    } catch (err) {
-        console.error('DASHBOARD ERROR:', err);
-        req.session.error_msg = "Error loading dashboard metrics: " + (err.message || String(err));
-        res.redirect('/login');
-    }
-});
-
-// ==========================================
-// 3. MASTER -> PARTY ROUTES
-// ==========================================
-
-app.get('/master/party', requireAuth, async (req, res) => {
-    try {
-        const parties = await db.query("SELECT * FROM parties ORDER BY name ASC");
-        res.render('parties/list', { currentRoute: 'master-party', parties });
-    } catch (err) {
-        req.session.error_msg = "Could not fetch parties list.";
-        res.redirect('/dashboard');
-    }
-});
-
-app.get('/master/party/add', requireAuth, (req, res) => {
-    res.render('parties/form', { currentRoute: 'master-party', isEdit: false, statesList: STATES_LIST });
-});
-
-app.post('/master/party/add', requireAuth, async (req, res) => {
-    const { name, type, address, shipping_address, gstin, state, state_code, contact_person, mobile, email, opening_balance, balance_type } = req.body;
-    if (!gstin || !isValidGstin(gstin)) {
-        req.session.error_msg = "Valid GSTIN (15 characters) is mandatory for party.";
-        return res.redirect('/master/party/add');
-    }
-    const opBal = parseFloat(opening_balance) || 0;
-    const currentBal = opBal * (balance_type === 'Dr' ? 1 : -1);
-
-    try {
-        await db.runQuery(
-            `INSERT INTO parties (name, type, address, shipping_address, gstin, state, state_code, contact_person, mobile, email, opening_balance, balance_type, current_balance) 
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [name, type, address, shipping_address, gstin, state, state_code, contact_person, mobile, email, opBal, balance_type, currentBal]
-        );
-        req.session.success_msg = "Party added successfully!";
-        res.redirect('/master/party');
-    } catch (err) {
-        res.render('parties/form', { currentRoute: 'master-party', isEdit: false, statesList: STATES_LIST, error_msg: "Error saving party details." });
-    }
-});
-
-app.get('/master/party/edit/:id', requireAuth, async (req, res) => {
-    try {
-        const party = await db.getOne("SELECT * FROM parties WHERE id = ?", [req.params.id]);
-        res.render('parties/form', { currentRoute: 'master-party', isEdit: true, party, statesList: STATES_LIST });
-    } catch (err) {
-        req.session.error_msg = "Party account not found.";
-        res.redirect('/master/party');
-    }
-});
-
-app.post('/master/party/edit/:id', requireAuth, async (req, res) => {
-    const { name, type, address, shipping_address, gstin, state, state_code, contact_person, mobile, email, opening_balance, balance_type } = req.body;
-    if (!gstin || !isValidGstin(gstin)) {
-        req.session.error_msg = "Valid GSTIN (15 characters) is mandatory for party.";
-        return res.redirect('/master/party/edit/' + req.params.id);
-    }
-    const opBal = parseFloat(opening_balance) || 0;
-    
-    try {
-        // Calculate new current balance by adjusting ledger transactions
-        const originalParty = await db.getOne("SELECT current_balance, opening_balance, balance_type FROM parties WHERE id = ?", [req.params.id]);
-        const originalOpBal = originalParty.opening_balance * (originalParty.balance_type === 'Dr' ? 1 : -1);
-        const difference = (opBal * (balance_type === 'Dr' ? 1 : -1)) - originalOpBal;
-        const newCurrentBalance = originalParty.current_balance + difference;
-
-        await db.runQuery(
-            `UPDATE parties SET name=?, type=?, address=?, shipping_address=?, gstin=?, state=?, state_code=?, contact_person=?, mobile=?, email=?, opening_balance=?, balance_type=?, current_balance=? WHERE id=?`,
-            [name, type, address, shipping_address, gstin, state, state_code, contact_person, mobile, email, opBal, balance_type, newCurrentBalance, req.params.id]
-        );
-        req.session.success_msg = "Party details updated successfully!";
-        res.redirect('/master/party');
-    } catch (err) {
-        req.session.error_msg = "Error updating party profile.";
-        res.redirect('/master/party');
-    }
-});
-
-app.get('/master/party/delete/:id', requireAuth, async (req, res) => {
-    try {
-        await db.runQuery("DELETE FROM parties WHERE id = ?", [req.params.id]);
-        req.session.success_msg = "Party deleted successfully!";
-    } catch (err) {
-        req.session.error_msg = "Cannot delete party linked to transactions.";
-    }
-    res.redirect('/master/party');
-});
-
-// ==========================================
-// 4. MASTER -> PRODUCT ROUTES
-// ==========================================
-
-app.get('/master/products', requireAuth, async (req, res) => {
-    try {
-        const products = await db.query(
-            `SELECT p.*, u.name AS unit_name, t.rate_percent AS tax_rate 
-             FROM products p 
-             JOIN units u ON p.unit_id = u.id 
-             JOIN taxes t ON p.tax_id = t.id 
-             ORDER BY p.name ASC`
-        );
-        res.render('products/list', { currentRoute: 'master-products', products });
-    } catch (err) {
-        req.session.error_msg = "Error loading products.";
-        res.redirect('/dashboard');
-    }
-});
-
-app.get('/master/products/add', requireAuth, async (req, res) => {
-    try {
-        const units = await db.query("SELECT * FROM units");
-        const taxes = await db.query("SELECT * FROM taxes");
-        res.render('products/form', { currentRoute: 'master-products', isEdit: false, units, taxes });
-    } catch (err) {
-        res.redirect('/master/products');
-    }
-});
-
-app.post('/master/products/add', requireAuth, async (req, res) => {
-    const { name, hsn_sac, unit_id, tax_id, purchase_rate, sale_rate, opening_stock } = req.body;
-    const opStock = parseFloat(opening_stock) || 0;
-
-    try {
-        const result = await db.runQuery(
-            `INSERT INTO products (name, hsn_sac, unit_id, tax_id, purchase_rate, sale_rate, opening_stock, current_stock) 
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-            [name, hsn_sac, unit_id, tax_id, parseFloat(purchase_rate), parseFloat(sale_rate), opStock, opStock]
-        );
-        
-        // Add opening stock ledger entry
-        await db.runQuery(
-            `INSERT INTO stock_ledger (product_id, type, qty, date, reference_table, reference_id, description) 
-             VALUES (?, 'IN', ?, CURRENT_DATE, 'products', ?, 'Opening Stock')`,
-            [result.id, opStock, result.id]
-        );
-
-        req.session.success_msg = "Product created successfully!";
-        res.redirect('/master/products');
-    } catch (err) {
-        req.session.error_msg = "Error saving product.";
-        res.redirect('/master/products');
-    }
-});
-
-app.get('/master/products/edit/:id', requireAuth, async (req, res) => {
-    try {
-        const product = await db.getOne("SELECT * FROM products WHERE id = ?", [req.params.id]);
-        const units = await db.query("SELECT * FROM units");
-        const taxes = await db.query("SELECT * FROM taxes");
-        res.render('products/form', { currentRoute: 'master-products', isEdit: true, product, units, taxes });
-    } catch (err) {
-        res.redirect('/master/products');
-    }
-});
-
-app.post('/master/products/edit/:id', requireAuth, async (req, res) => {
-    const { name, hsn_sac, unit_id, tax_id, purchase_rate, sale_rate } = req.body;
-    try {
-        await db.runQuery(
-            `UPDATE products SET name=?, hsn_sac=?, unit_id=?, tax_id=?, purchase_rate=?, sale_rate=? WHERE id=?`,
-            [name, hsn_sac, unit_id, tax_id, parseFloat(purchase_rate), parseFloat(sale_rate), req.params.id]
-        );
-        req.session.success_msg = "Product updated successfully!";
-        res.redirect('/master/products');
-    } catch (err) {
-        req.session.error_msg = "Error updating product.";
-        res.redirect('/master/products');
-    }
-});
-
-app.get('/master/products/delete/:id', requireAuth, async (req, res) => {
-    try {
-        await db.runQuery("DELETE FROM products WHERE id = ?", [req.params.id]);
-        req.session.success_msg = "Product deleted successfully!";
-    } catch (err) {
-        req.session.error_msg = "Cannot delete product mapped to invoice items.";
-    }
-    res.redirect('/master/products');
-});
-
-// ==========================================
-// 5. SALES & BILLING / CHALLAN ROUTES
-// ==========================================
-
-app.get('/sales/bill', requireAuth, async (req, res) => {
-    try {
-        const invoices = await db.query(
-            `SELECT s.*, p.name AS party_name 
-             FROM sales_invoices s 
-             JOIN parties p ON s.party_id = p.id 
-             WHERE s.type = 'Invoice' 
-             ORDER BY s.date DESC, s.invoice_no DESC`
-        );
-        res.render('sales/bills_list', { currentRoute: 'sales-bill', typeFilter: 'Invoice', invoices });
-    } catch (err) {
-        res.redirect('/dashboard');
-    }
-});
-
-app.get('/sales/challan', requireAuth, async (req, res) => {
-    try {
-        const invoices = await db.query(
-            `SELECT s.*, p.name AS party_name 
-             FROM sales_invoices s 
-             JOIN parties p ON s.party_id = p.id 
-             WHERE s.type = 'Challan' 
-             ORDER BY s.date DESC, s.invoice_no DESC`
-        );
-        res.render('sales/bills_list', { currentRoute: 'sales-challan', typeFilter: 'Challan', invoices });
-    } catch (err) {
-        res.redirect('/dashboard');
-    }
-});
-
-app.get('/sales/bill/add', requireAuth, async (req, res) => {
-    try {
-        const companies = await db.query("SELECT * FROM companies");
-        const years = await db.query("SELECT * FROM financial_years");
-        const activeCompany = companies[0] || {};
-        const parties = await db.query("SELECT * FROM parties WHERE type IN ('Customer', 'Both') ORDER BY name ASC");
-        const products = await db.query(
-            `SELECT p.*, t.rate_percent AS tax_rate, u.name AS unit_name 
-             FROM products p 
-             JOIN taxes t ON p.tax_id = t.id
-             JOIN units u ON p.unit_id = u.id`
-        );
-        
-        // Generate next invoice number
-        const invCount = await db.getOne("SELECT COUNT(*) AS count FROM sales_invoices WHERE type='Invoice'");
-        const nextInvoiceNo = `${activeCompany.invoice_prefix || 'VS'}/INV/${(invCount.count + 1).toString().padStart(4, '0')}`;
-        
-        res.render('sales/bill_form', {
-            currentRoute: 'sales-bill',
-            isEdit: false,
-            companies,
-            years,
-            activeCompany,
-            parties,
-            products,
-            nextInvoiceNo,
-            todayDate: new Date().toISOString().split('T')[0]
-        });
-    } catch (err) {
-        console.error(err);
-        res.redirect('/sales/bill');
-    }
-});
-
-app.post('/sales/bill/add', requireAuth, async (req, res) => {
-    const { type, company_id, party_id, financial_year_id, date, sub_total, tax_total, round_off, grand_total, notes, status, items } = req.body;
-    const isDraft = status === 'Draft' ? 1 : 0;
-
-    try {
-        // 1. Insert Sales Invoice Header
-        const header = await db.runQuery(
-            `INSERT INTO sales_invoices (type, invoice_no, company_id, party_id, financial_year_id, date, sub_total, tax_total, round_off, grand_total, is_draft, notes) 
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [type, req.body.invoice_no, company_id, party_id, financial_year_id, date, parseFloat(sub_total), parseFloat(tax_total), parseFloat(round_off), parseFloat(grand_total), isDraft, notes]
-        );
-
-        const invoiceId = header.id;
-
-        // 2. Loop and Insert Line Items
-        if (items && typeof items === 'object') {
-            for (const key in items) {
-                const item = items[key];
-                if (!item.product_id) continue;
-
-                await db.runQuery(
-                    `INSERT INTO sales_invoice_items (invoice_id, product_id, bags, quantity, rate, unit, amount, cgst_percent, cgst_amount, sgst_percent, sgst_amount, igst_percent, igst_amount, total) 
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                    [
-                        invoiceId, item.product_id, parseInt(item.bags) || 0, parseFloat(item.quantity) || 0, parseFloat(item.rate) || 0, item.unit, parseFloat(item.amount) || 0,
-                        parseFloat(item.cgst_percent) || 0, parseFloat(item.cgst_amount) || 0, parseFloat(item.sgst_percent) || 0, parseFloat(item.sgst_amount) || 0,
-                        parseFloat(item.igst_percent) || 0, parseFloat(item.igst_amount) || 0, parseFloat(item.total) || 0
-                    ]
-                );
-
-                // If final sale -> reduce product current stock level & create stock ledger entry
-                if (isDraft === 0) {
-                    const qty = parseFloat(item.quantity) || 0;
-                    const prodStock = await db.getOne("SELECT current_stock, name FROM products WHERE id = ?", [item.product_id]);
-                    if (prodStock && (prodStock.current_stock - qty) < 0) {
-                        // still allow sale but log; soft guard - prefer not to block business
-                        console.warn(`Stock low for product ${prodStock.name}: ${prodStock.current_stock} available, selling ${qty}`);
-                    }
-                    await db.runQuery("UPDATE products SET current_stock = current_stock - ? WHERE id = ?", [qty, item.product_id]);
-                    await db.runQuery(
-                        `INSERT INTO stock_ledger (product_id, type, qty, bags, date, reference_table, reference_id, description) 
-                         VALUES (?, 'OUT', ?, ?, ?, 'sales_invoice_items', ?, ?)`,
-                        [item.product_id, qty, parseInt(item.bags) || 0, date, invoiceId, `Sales ${type}: ${req.body.invoice_no}`]
-                    );
-                }
-            }
+        if (!p) {
+          skipped++;
+          continue;
         }
-
-        // 3. Update Party Account Balance if not Draft
-        if (isDraft === 0) {
-            const billAmt = parseFloat(grand_total) || 0;
-            // Sales increase Customer Receivable outstanding balance (+)
-            await db.runQuery("UPDATE parties SET current_balance = current_balance + ? WHERE id = ?", [billAmt, party_id]);
-        }
-
-        req.session.success_msg = `Sales ${type} created successfully!`;
-        if (isDraft === 0) {
-            res.redirect(`/sales/bill/print/${invoiceId}`);
-        } else {
-            res.redirect(type === 'Invoice' ? '/sales/bill' : '/sales/challan');
-        }
-    } catch (err) {
-        console.error(err);
-        req.session.error_msg = "Error creating invoice. Please try again.";
-        res.redirect('/sales/bill');
-    }
-});
-
-app.get('/sales/bill/print/:id', requireAuth, async (req, res) => {
-    try {
-        const invoice = await db.getOne("SELECT * FROM sales_invoices WHERE id = ?", [req.params.id]);
-        if (!invoice) return res.redirect('/sales/bill');
-
-        const company = await db.getOne("SELECT * FROM companies WHERE id = ?", [invoice.company_id]);
-        const party = await db.getOne("SELECT * FROM parties WHERE id = ?", [invoice.party_id]);
-        const items = await db.query(
-            `SELECT i.*, p.name AS product_name, p.hsn_sac 
-             FROM sales_invoice_items i 
-             JOIN products p ON i.product_id = p.id 
-             WHERE i.invoice_id = ?`,
-            [invoice.id]
+        const qty =
+          p.moq + Math.ceil(Math.max(0, item.qty - p.moq) / p.step) * p.step;
+        await tx.run("DELETE FROM w_cart WHERE user_id=? AND product_id=?", [
+          req.user.id,
+          p.id,
+        ]);
+        await tx.run(
+          "INSERT INTO w_cart (user_id,product_id,qty) VALUES (?,?,?)",
+          [req.user.id, p.id, qty],
         );
-        const year = await db.getOne("SELECT name FROM financial_years WHERE id = ?", [invoice.financial_year_id]);
-
-        // CGST / SGST / IGST visual trigger
-        const taxMode = (party.state_code && company.gstin && party.state_code === company.gstin.substring(0, 2)) ? 'intra' : 'inter';
-        const grandTotalWords = numberToWords(invoice.grand_total);
-
-        res.render('sales/print_invoice', {
-            currentRoute: invoice.type === 'Invoice' ? 'sales-bill' : 'sales-challan',
-            invoice,
-            company,
-            party,
-            items,
-            taxMode,
-            financialYear: year ? year.name : '',
-            grandTotalWords
-        });
-    } catch (err) {
-        console.error(err);
-        res.redirect('/sales/bill');
-    }
+      }
+    });
+    redirect(
+      res,
+      "/cart",
+      `Products added using current quantities and pricing. ${skipped} archived products skipped. Review availability before submitting.`,
+    );
+  }),
+);
+app.post(
+  "/orders/:id/payment-reference",
+  approved,
+  wrap(async (req, res) => {
+    const { o } = await orderData(req);
+    if (o.status !== "Awaiting Payment")
+      d.fail("Payment is not currently requested.");
+    await db.transaction(async (tx) => {
+      const r = await tx.run(
+        "UPDATE w_orders SET status='Payment Verification Pending' WHERE id=? AND status='Awaiting Payment'",
+        [o.id],
+      );
+      if (!r.changes) d.fail("Order status changed. Reload and try again.");
+      await d.history(
+        tx,
+        o.id,
+        req.user.id,
+        "Customer submitted reference (unverified): " +
+          d.field(req.body.reference, "payment reference"),
+      );
+    });
+    res.redirect("/orders/" + o.id);
+  }),
+);
+app.get("/about", (req, res) =>
+  res.render("info", {
+    heading: "Built for the businesses behind beautiful spaces.",
+    body: "We are an Ahmedabad-based wholesale curtain accessories business serving showrooms, tailors, decorators and dealers. Browse our range, request a quotation and speak directly with our team before payment. We confirm product specifications, stock and transport for every order.",
+  }),
+);
+app.get("/contact", (req, res) =>
+  res.render("info", {
+    heading: "Let’s talk about your next order.",
+    body: "Contact our team for product specifications, bulk requirements and order support. Business contact details appear below when configured.",
+  }),
+);
+app.get("/policies/:type", (req, res) => {
+  if (!["privacy", "terms", "shipping", "returns"].includes(req.params.type))
+    return res
+      .status(404)
+      .render("info", {
+        heading: "Page not found",
+        body: "Return to the catalogue.",
+      });
+  res.render("info", {
+    heading:
+      req.params.type[0].toUpperCase() + req.params.type.slice(1) + " policy",
+    body: req.settings[req.params.type],
+  });
 });
-
-app.get('/sales/bill/edit/:id', requireAuth, async (req, res) => {
-    try {
-        const invoice = await db.getOne("SELECT * FROM sales_invoices WHERE id = ?", [req.params.id]);
-        if (!invoice) return res.redirect('/sales/bill');
-
-        const companies = await db.query("SELECT * FROM companies");
-        const years = await db.query("SELECT * FROM financial_years");
-        const parties = await db.query("SELECT * FROM parties ORDER BY name ASC");
-        const products = await db.query(
-            `SELECT p.*, t.rate_percent AS tax_rate, u.name AS unit_name 
-             FROM products p 
-             JOIN taxes t ON p.tax_id = t.id
-             JOIN units u ON p.unit_id = u.id`
+app.use("/admin", admin);
+app.get(
+  "/admin",
+  wrap(async (req, res) => {
+    const orders = await db.all(
+      "SELECT o.*,u.business,u.city,u.state FROM w_orders o JOIN w_users u ON u.id=o.user_id ORDER BY o.id DESC",
+    );
+    const customers = await db.all(
+      "SELECT id,status FROM w_users WHERE role='customer'",
+    );
+    res.render("admin", {
+      orders,
+      customers,
+      low: await db.all(
+        "SELECT * FROM w_products WHERE active=1 AND stock-reserved<=threshold",
+      ),
+      audit: await db.all("SELECT * FROM w_audit ORDER BY id DESC LIMIT 20"),
+    });
+  }),
+);
+app.get(
+  "/admin/orders",
+  wrap(async (req, res) => {
+    let orders = await db.all(
+      "SELECT o.*,u.business FROM w_orders o JOIN w_users u ON u.id=o.user_id ORDER BY o.id DESC",
+    );
+    if (req.query.status)
+      orders = orders.filter((o) => o.status === req.query.status);
+    res.render("orders", { orders, adminView: true });
+  }),
+);
+app.post(
+  "/admin/orders/:id/status",
+  wrap(async (req, res) => {
+    await d.transition(
+      db,
+      d.integer(req.params.id, 1),
+      req.user.id,
+      req.body.status,
+    );
+    res.redirect("/orders/" + req.params.id);
+  }),
+);
+app.post(
+  "/admin/orders/:id/quote",
+  wrap(async (req, res) => {
+    const id = d.integer(req.params.id, 1);
+    await db.transaction(async (tx) => {
+      const o = await tx.one("SELECT * FROM w_orders WHERE id=?" + db.lock, [
+        id,
+      ]);
+      if (
+        !o ||
+        !["Under Review", "Awaiting Customer Confirmation"].includes(o.status)
+      )
+        d.fail(
+          "Quotation can only be edited during review or customer confirmation.",
         );
-        const items = await db.query("SELECT * FROM sales_invoice_items WHERE invoice_id = ?", [invoice.id]);
-        const activeCompany = companies.find(c => c.id === invoice.company_id) || companies[0];
-
-        res.render('sales/bill_form', {
-            currentRoute: invoice.type === 'Invoice' ? 'sales-bill' : 'sales-challan',
-            isEdit: true,
-            invoice,
-            companies,
-            years,
-            activeCompany,
-            parties,
-            products,
-            items,
-            todayDate: invoice.date
-        });
-    } catch (err) {
-        console.error(err);
-        res.redirect('/sales/bill');
-    }
-});
-
-app.post('/sales/bill/edit/:id', requireAuth, async (req, res) => {
-    const invoiceId = req.params.id;
-    const { type, company_id, party_id, financial_year_id, date, sub_total, tax_total, round_off, grand_total, notes, status, items } = req.body;
-    const isDraft = status === 'Draft' ? 1 : 0;
-
-    try {
-        const oldInvoice = await db.getOne("SELECT * FROM sales_invoices WHERE id = ?", [invoiceId]);
-        const oldItems = await db.query("SELECT * FROM sales_invoice_items WHERE invoice_id = ?", [invoiceId]);
-
-        // 1. Revert Old Party balances & Stock if the old invoice was Final
-        if (oldInvoice.is_draft === 0) {
-            await db.runQuery("UPDATE parties SET current_balance = current_balance - ? WHERE id = ?", [oldInvoice.grand_total, oldInvoice.party_id]);
-            
-            for (const item of oldItems) {
-                await db.runQuery("UPDATE products SET current_stock = current_stock + ? WHERE id = ?", [item.quantity, item.product_id]);
-            }
-            await db.runQuery("DELETE FROM stock_ledger WHERE reference_table = 'sales_invoice_items' AND reference_id = ?", [invoiceId]);
-        }
-
-        // Delete old items
-        await db.runQuery("DELETE FROM sales_invoice_items WHERE invoice_id = ?", [invoiceId]);
-
-        // 2. Update Invoice Header
-        await db.runQuery(
-            `UPDATE sales_invoices SET type=?, company_id=?, party_id=?, financial_year_id=?, date=?, sub_total=?, tax_total=?, round_off=?, grand_total=?, is_draft=?, notes=? 
-             WHERE id=?`,
-            [type, company_id, party_id, financial_year_id, date, parseFloat(sub_total), parseFloat(tax_total), parseFloat(round_off), parseFloat(grand_total), isDraft, notes, invoiceId]
+      const subtotal = d.money(req.body.subtotal),
+        tax = d.money(req.body.tax),
+        shipping = d.money(req.body.shipping),
+        discount = d.money(req.body.discount),
+        total = subtotal + tax + shipping - discount;
+      if (total <= 0) d.fail("Final payable amount must be positive.");
+      await tx.run(
+        "UPDATE w_orders SET subtotal=?,tax=?,shipping=?,discount=?,total=?,notes=? WHERE id=?",
+        [
+          subtotal,
+          tax,
+          shipping,
+          discount,
+          total,
+          String(req.body.notes || "").slice(0, 2000),
+          id,
+        ],
+      );
+      await d.history(
+        tx,
+        id,
+        req.user.id,
+        `Final quotation updated: ${fmt(total)}. ${String(req.body.notes || "").slice(0, 1000)}`,
+      );
+      await d.audit(tx, req.user.id, `Quotation updated: ${o.reference}`);
+    });
+    res.redirect("/orders/" + id);
+  }),
+);
+app.post(
+  "/admin/orders/:id/payment",
+  wrap(async (req, res) => {
+    await d.confirmPayment(
+      db,
+      d.integer(req.params.id, 1),
+      req.user.id,
+      req.body,
+    );
+    res.redirect("/orders/" + req.params.id);
+  }),
+);
+app.post(
+  "/admin/orders/:id/shipping",
+  wrap(async (req, res) => {
+    const id = d.integer(req.params.id, 1),
+      link = String(req.body.link || "").trim();
+    if (link && !/^https:\/\//.test(link))
+      d.fail("Tracking URL must use https.");
+    await db.transaction(async (tx) => {
+      const o = await tx.one("SELECT * FROM w_orders WHERE id=?" + db.lock, [
+        id,
+      ]);
+      if (!o || !o.paid || ["Refunded", "Cancelled"].includes(o.status))
+        d.fail("Verified payment is required before arranging shipment.");
+      const old = await tx.one("SELECT * FROM w_shipping WHERE order_id=?", [
+        id,
+      ]);
+      await tx.run("DELETE FROM w_shipping WHERE order_id=?", [id]);
+      await tx.run(
+        "INSERT INTO w_shipping (order_id,courier,tracking,link,dispatched_at,estimated_date) VALUES (?,?,?,?,?,?)",
+        [
+          id,
+          d.field(req.body.courier, "courier", 100),
+          d.field(req.body.tracking, "tracking number"),
+          link,
+          old?.dispatched_at || null,
+          String(req.body.estimated_date || "").slice(0, 10),
+        ],
+      );
+      await d.history(tx, id, req.user.id, "Shipping information updated");
+    });
+    res.redirect("/orders/" + id);
+  }),
+);
+app.get(
+  "/admin/customers",
+  wrap(async (req, res) => {
+    let customers = await db.all(
+      "SELECT u.*,t.name AS tier FROM w_users u LEFT JOIN w_tiers t ON t.id=u.tier_id WHERE u.role='customer' ORDER BY u.id DESC",
+    );
+    const q = String(req.query.q || "").toLowerCase();
+    if (q)
+      customers = customers.filter((u) =>
+        [u.business, u.city, u.state, u.business_type, u.email].some((v) =>
+          v.toLowerCase().includes(q),
+        ),
+      );
+    if (req.query.status)
+      customers = customers.filter((u) => u.status === req.query.status);
+    res.render("customers", {
+      customers,
+      tiers: await db.all("SELECT * FROM w_tiers"),
+      query: req.query,
+    });
+  }),
+);
+app.post(
+  "/admin/customers/:id",
+  wrap(async (req, res) => {
+    const id = d.integer(req.params.id, 1);
+    if (
+      !["approved", "pending", "rejected", "suspended"].includes(
+        req.body.status,
+      )
+    )
+      d.fail("Invalid customer status.");
+    await db.transaction(async (tx) => {
+      const target = await tx.one(
+        "SELECT id FROM w_users WHERE id=? AND role='customer'",
+        [id],
+      );
+      if (!target) d.fail("Customer not found.", 404);
+      await tx.run(
+        "UPDATE w_users SET status=?,tier_id=?,notes=? WHERE id=? AND role='customer'",
+        [
+          req.body.status,
+          d.integer(req.body.tier_id, 1),
+          String(req.body.notes || "").slice(0, 2000),
+          id,
+        ],
+      );
+      if (req.body.status !== "approved")
+        await tx.run("DELETE FROM w_sessions WHERE user_id=?", [id]);
+      await d.audit(
+        tx,
+        req.user.id,
+        `Customer ${id}: ${req.body.status}; tier ${req.body.tier_id}`,
+      );
+    });
+    redirect(res, "/admin/customers", "Customer updated.");
+  }),
+);
+app.post(
+  "/admin/products/:id/image",
+  wrap(async (req, res) => {
+    const id = d.integer(req.params.id, 1),
+      data = req.body,
+      mime = req.get("Content-Type");
+    if (!Buffer.isBuffer(data) || data.length < 12)
+      d.fail("Choose a PNG, JPEG or WebP image up to 2 MB.");
+    const valid =
+      (mime === "image/png" &&
+        data
+          .subarray(0, 8)
+          .equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) ||
+      (mime === "image/jpeg" &&
+        data[0] === 255 &&
+        data[1] === 216 &&
+        data[2] === 255) ||
+      (mime === "image/webp" &&
+        data.toString("ascii", 0, 4) === "RIFF" &&
+        data.toString("ascii", 8, 12) === "WEBP");
+    if (!valid) d.fail("The uploaded file does not match its image type.");
+    await db.transaction(async (tx) => {
+      if (!(await tx.one("SELECT id FROM w_products WHERE id=?", [id])))
+        d.fail("Product not found.", 404);
+      const image = await tx.run(
+        "INSERT INTO w_images (mime,image_data) VALUES (?,?)",
+        [mime, data.toString("base64")],
+      );
+      await tx.run("UPDATE w_products SET image=? WHERE id=?", [
+        "/media/" + image.id,
+        id,
+      ]);
+      await d.audit(tx, req.user.id, `Product ${id} image uploaded`);
+    });
+    res.json({ ok: true });
+  }),
+);
+app.get(
+  "/media/:id",
+  wrap(async (req, res) => {
+    const image = await db.one("SELECT * FROM w_images WHERE id=?", [
+      d.integer(req.params.id, 1),
+    ]);
+    if (!image) d.fail("Image not found.", 404);
+    res
+      .set("Cache-Control", "public,max-age=86400")
+      .type(image.mime)
+      .send(Buffer.from(image.image_data, "base64"));
+  }),
+);
+app.get(
+  "/admin/products",
+  wrap(async (req, res) =>
+    res.render("manage-products", {
+      products: await db.all("SELECT * FROM w_products ORDER BY id DESC"),
+    }),
+  ),
+);
+app.get(
+  "/admin/products/new",
+  wrap(async (req, res) =>
+    res.render("product-form", {
+      p: { moq: 1, step: 1, unit: "pieces", tax: 0, active: 1, featured: 1 },
+      rules: [],
+      tiers: await db.all("SELECT * FROM w_tiers"),
+    }),
+  ),
+);
+app.get(
+  "/admin/products/:id",
+  wrap(async (req, res) => {
+    const p = await db.one("SELECT * FROM w_products WHERE id=?", [
+      d.integer(req.params.id, 1),
+    ]);
+    if (!p) d.fail("Product not found.", 404);
+    res.render("product-form", {
+      p,
+      rules: await db.all("SELECT * FROM w_prices WHERE product_id=?", [p.id]),
+      tiers: await db.all("SELECT * FROM w_tiers"),
+    });
+  }),
+);
+app.post(
+  "/admin/products",
+  wrap(async (req, res) => {
+    const b = req.body;
+    const slug = d.field(b.slug, "product URL", 180);
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug))
+      d.fail("Use lowercase letters, numbers and hyphens for the product URL.");
+    const image = String(b.image || "").trim();
+    if (image && !/^https:\/\//.test(image) && !/^\/media\/\d+$/.test(image))
+      d.fail("Use an https product image URL.");
+    if (!["pieces", "packets", "boxes", "rolls", "metres"].includes(b.unit))
+      d.fail("Choose a supported unit.");
+    const values = [
+      d.field(b.name, "product name"),
+      slug,
+      d.field(b.sku, "SKU", 80),
+      d.integer(b.category_id, 1),
+      String(b.description || "").slice(0, 5000),
+      b.unit,
+      b.price === "" ? null : d.money(b.price),
+      b.cost === "" ? null : d.money(b.cost),
+      d.integer(b.moq, 1, 1000000),
+      d.integer(b.step, 1, 1000000),
+      d.integer(Math.round(Number(b.tax) * 100), 0, 10000),
+      b.active === "1" ? 1 : 0,
+      b.featured === "1" ? 1 : 0,
+      image,
+      String(b.variant || "").slice(0, 160),
+      String(b.material || "").slice(0, 100),
+    ];
+    await db.transaction(async (tx) => {
+      let id;
+      if (b.id) {
+        id = d.integer(b.id, 1);
+        await tx.run(
+          "UPDATE w_products SET name=?,slug=?,sku=?,category_id=?,description=?,unit=?,price=?,cost=?,moq=?,step=?,tax=?,active=?,featured=?,image=?,variant=?,material=? WHERE id=?",
+          [...values, id],
         );
-
-        // 3. Insert New Line Items & recalculate Stock
-        if (items && typeof items === 'object') {
-            for (const key in items) {
-                const item = items[key];
-                if (!item.product_id) continue;
-
-                await db.runQuery(
-                    `INSERT INTO sales_invoice_items (invoice_id, product_id, bags, quantity, rate, unit, amount, cgst_percent, cgst_amount, sgst_percent, sgst_amount, igst_percent, igst_amount, total) 
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                    [
-                        invoiceId, item.product_id, parseInt(item.bags) || 0, parseFloat(item.quantity) || 0, parseFloat(item.rate) || 0, item.unit, parseFloat(item.amount) || 0,
-                        parseFloat(item.cgst_percent) || 0, parseFloat(item.cgst_amount) || 0, parseFloat(item.sgst_percent) || 0, parseFloat(item.sgst_amount) || 0,
-                        parseFloat(item.igst_percent) || 0, parseFloat(item.igst_amount) || 0, parseFloat(item.total) || 0
-                    ]
-                );
-
-                if (isDraft === 0) {
-                    const qty = parseFloat(item.quantity) || 0;
-                    const prodStock = await db.getOne("SELECT current_stock, name FROM products WHERE id = ?", [item.product_id]);
-                    if (prodStock && (prodStock.current_stock - qty) < 0) {
-                        // still allow sale but log; soft guard - prefer not to block business
-                        console.warn(`Stock low for product ${prodStock.name}: ${prodStock.current_stock} available, selling ${qty}`);
-                    }
-                    await db.runQuery("UPDATE products SET current_stock = current_stock - ? WHERE id = ?", [qty, item.product_id]);
-                    await db.runQuery(
-                        `INSERT INTO stock_ledger (product_id, type, qty, bags, date, reference_table, reference_id, description) 
-                         VALUES (?, 'OUT', ?, ?, ?, 'sales_invoice_items', ?, ?)`,
-                        [item.product_id, qty, parseInt(item.bags) || 0, date, invoiceId, `Sales ${type}: ${oldInvoice.invoice_no}`]
-                    );
-                }
-            }
-        }
-
-        // 4. Update new Party Outstanding Balance if final
-        if (isDraft === 0) {
-            const billAmt = parseFloat(grand_total) || 0;
-            await db.runQuery("UPDATE parties SET current_balance = current_balance + ? WHERE id = ?", [billAmt, party_id]);
-        }
-
-        req.session.success_msg = `Sales ${type} updated successfully!`;
-        if (isDraft === 0) {
-            res.redirect(`/sales/bill/print/${invoiceId}`);
-        } else {
-            res.redirect(type === 'Invoice' ? '/sales/bill' : '/sales/challan');
-        }
-    } catch (err) {
-        console.error(err);
-        req.session.error_msg = "Error updating bill.";
-        res.redirect('/sales/bill');
-    }
+      } else {
+        id = (
+          await tx.run(
+            "INSERT INTO w_products (name,slug,sku,category_id,description,unit,price,cost,moq,step,tax,active,featured,image,variant,material) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            values,
+          )
+        ).id;
+      }
+      await d.audit(tx, req.user.id, `Product ${id} saved`);
+    });
+    redirect(res, "/admin/products", "Product saved.");
+  }),
+);
+app.post(
+  "/admin/prices",
+  wrap(async (req, res) => {
+    const b = req.body;
+    await db.transaction(async (tx) => {
+      await tx.run(
+        "INSERT INTO w_prices (product_id,tier_id,user_id,min_qty,price) VALUES (?,?,?,?,?)",
+        [
+          d.integer(b.product_id, 1),
+          b.tier_id ? d.integer(b.tier_id, 1) : null,
+          b.user_id ? d.integer(b.user_id, 1) : null,
+          d.integer(b.min_qty, 1),
+          d.money(b.price),
+        ],
+      );
+      await d.audit(tx, req.user.id, "Pricing rule created");
+    });
+    res.redirect("/admin/products/" + d.integer(b.product_id, 1));
+  }),
+);
+app.post(
+  "/admin/prices/:id/delete",
+  wrap(async (req, res) => {
+    await db.transaction(async (tx) => {
+      await tx.run("DELETE FROM w_prices WHERE id=?", [
+        d.integer(req.params.id, 1),
+      ]);
+      await d.audit(tx, req.user.id, "Pricing rule removed");
+    });
+    res.redirect("/admin/products");
+  }),
+);
+app.get(
+  "/admin/inventory",
+  wrap(async (req, res) =>
+    res.render("inventory", {
+      products: await db.all("SELECT * FROM w_products ORDER BY name"),
+      movements: await db.all(
+        "SELECT m.*,p.name FROM w_movements m JOIN w_products p ON p.id=m.product_id ORDER BY m.id DESC LIMIT 100",
+      ),
+    }),
+  ),
+);
+app.post(
+  "/admin/inventory",
+  wrap(async (req, res) => {
+    const id = d.integer(req.body.product_id, 1),
+      delta = d.integer(req.body.delta, -1000000, 1000000),
+      threshold = d.integer(req.body.threshold);
+    await db.transaction(async (tx) => {
+      const r = await tx.run(
+        "UPDATE w_products SET stock=stock+?,threshold=? WHERE id=? AND stock+?>=reserved",
+        [delta, threshold, id, delta],
+      );
+      if (!r.changes)
+        d.fail("Adjustment would reduce stock below the reserved quantity.");
+      await tx.run(
+        "INSERT INTO w_movements (product_id,actor_id,delta,reason,created_at) VALUES (?,?,?,?,?)",
+        [
+          id,
+          req.user.id,
+          delta,
+          d.field(req.body.reason, "adjustment reason", 1000),
+          d.now(),
+        ],
+      );
+      await d.audit(tx, req.user.id, `Inventory ${id}: ${delta}`);
+    });
+    redirect(res, "/admin/inventory", "Stock adjustment recorded.");
+  }),
+);
+app.get(
+  "/admin/settings",
+  wrap(async (req, res) =>
+    res.render("settings", { tiers: await db.all("SELECT * FROM w_tiers") }),
+  ),
+);
+app.post(
+  "/admin/settings",
+  wrap(async (req, res) => {
+    const s = { ...req.settings };
+    for (const k of [
+      "name",
+      "phone",
+      "whatsapp",
+      "email",
+      "address",
+      "headline",
+      "payment",
+      "shipping",
+      "returns",
+      "privacy",
+      "terms",
+    ])
+      s[k] = String(req.body[k] || "")
+        .trim()
+        .slice(0, 5000);
+    if (!s.name) d.fail("Business name is required.");
+    for (const k of ["phone", "whatsapp"])
+      if (s[k] && !/^\+?\d{10,15}$/.test(s[k]))
+        d.fail("Use country code and digits for contact numbers.");
+    s.minimum = d.money(req.body.minimum);
+    await db.transaction(async (tx) => {
+      await tx.run("UPDATE w_settings SET data=? WHERE id=1", [
+        JSON.stringify(s),
+      ]);
+      await d.audit(tx, req.user.id, "Business settings updated");
+    });
+    redirect(res, "/admin/settings", "Settings saved.");
+  }),
+);
+app.post(
+  "/admin/categories",
+  wrap(async (req, res) => {
+    await db.run("INSERT INTO w_categories (name) VALUES (?)", [
+      d.field(req.body.name, "category", 100),
+    ]);
+    redirect(res, "/admin/settings", "Category created.");
+  }),
+);
+app.post(
+  "/admin/tiers",
+  wrap(async (req, res) => {
+    await db.run("INSERT INTO w_tiers (name) VALUES (?)", [
+      d.field(req.body.name, "pricing tier", 80),
+    ]);
+    redirect(res, "/admin/settings", "Pricing tier created.");
+  }),
+);
+function csv(rows) {
+  const safe = (v) =>
+    '"' +
+    String(v ?? "")
+      .replace(/^[=+@\-\t\r]/, "'$&")
+      .replaceAll('"', '""') +
+    '"';
+  const keys = Object.keys(rows[0] || {});
+  return [
+    keys.map(safe).join(","),
+    ...rows.map((r) => keys.map((k) => safe(r[k])).join(",")),
+  ].join("\r\n");
+}
+app.get(
+  "/admin/export/:type",
+  wrap(async (req, res) => {
+    let rows;
+    if (req.params.type === "customers")
+      rows = await db.all(
+        "SELECT id,business,contact,email,phone,city,state,status FROM w_users WHERE role='customer'",
+      );
+    else if (req.params.type === "orders")
+      rows = await db.all(
+        "SELECT reference,status,subtotal,tax,shipping,discount,total,paid,created_at FROM w_orders ORDER BY id DESC",
+      );
+    else d.fail("Export not found.", 404);
+    await d.audit(db, req.user.id, `Exported ${req.params.type}`);
+    res
+      .type("text/csv")
+      .attachment(req.params.type + ".csv")
+      .send(csv(rows));
+  }),
+);
+app.get(
+  "/admin/analytics",
+  wrap(async (req, res) => {
+    let orders = await db.all(
+      "SELECT o.*,u.business,u.city,u.state FROM w_orders o JOIN w_users u ON u.id=o.user_id",
+    );
+    if (req.query.from)
+      orders = orders.filter(
+        (o) => o.created_at.slice(0, 10) >= req.query.from,
+      );
+    if (req.query.to)
+      orders = orders.filter((o) => o.created_at.slice(0, 10) <= req.query.to);
+    res.render("analytics", { orders, query: req.query });
+  }),
+);
+app.get("/robots.txt", (req, res) =>
+  res
+    .type("text/plain")
+    .send(
+      "User-agent: *\nDisallow: /admin\nDisallow: /account\nDisallow: /orders\nDisallow: /cart\nDisallow: /saved\n" +
+        (process.env.PUBLIC_URL
+          ? "Sitemap: " +
+            process.env.PUBLIC_URL.replace(/\/$/, "") +
+            "/sitemap.xml"
+          : ""),
+    ),
+);
+app.get(
+  "/sitemap.xml",
+  wrap(async (req, res) => {
+    if (!process.env.PUBLIC_URL)
+      d.fail("Set PUBLIC_URL to enable the sitemap.", 503);
+    const base = new URL(process.env.PUBLIC_URL).origin;
+    const products = await db.all("SELECT slug FROM w_products WHERE active=1");
+    res
+      .type("application/xml")
+      .send(
+        '<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' +
+          [
+            "",
+            "/products",
+            "/categories",
+            "/about",
+            "/contact",
+            ...products.map((p) => "/products/" + p.slug),
+          ]
+            .map((p) => "<url><loc>" + base + p + "</loc></url>")
+            .join("") +
+          "</urlset>",
+      );
+  }),
+);
+app.use((req, res) =>
+  res
+    .status(404)
+    .render("info", {
+      heading: "Page not found",
+      body: "This page may have moved. Explore our product catalogue to continue.",
+    }),
+);
+app.use((err, req, res, next) => {
+  if (res.headersSent) return next(err);
+  const known = !!err.status;
+  res.status(err.status || 500);
+  if (!known) console.error("Request failed:", err.code || err.name);
+  res.render("info", {
+    heading: known
+      ? "Please check your request"
+      : "We couldn’t complete that request",
+    body: known
+      ? err.message
+      : "Please try again. If the problem continues, contact our team.",
+    settings: req.settings || { name: "VS Curtain Accessories" },
+    categories: res.locals.categories || [],
+    user: req.user || null,
+    csrf: res.locals.csrf || "",
+    message: "",
+    fmt,
+    wa: () => "/contact",
+    path: req.path,
+    title: "Request error",
+  });
 });
-
-app.get('/sales/bill/delete/:id', requireAuth, async (req, res) => {
-    try {
-        const inv = await db.getOne("SELECT * FROM sales_invoices WHERE id = ?", [req.params.id]);
-        const items = await db.query("SELECT * FROM sales_invoice_items WHERE invoice_id = ?", [req.params.id]);
-
-        if (inv.is_draft === 0) {
-            // Revert party balance
-            await db.runQuery("UPDATE parties SET current_balance = current_balance - ? WHERE id = ?", [inv.grand_total, inv.party_id]);
-            // Revert stock levels
-            for (const item of items) {
-                await db.runQuery("UPDATE products SET current_stock = current_stock + ? WHERE id = ?", [item.quantity, item.product_id]);
-            }
-            // Clear stock logs
-            await db.runQuery("DELETE FROM stock_ledger WHERE reference_table = 'sales_invoice_items' AND reference_id = ?", [inv.id]);
-        }
-
-        await db.runQuery("DELETE FROM sales_invoices WHERE id = ?", [req.params.id]);
-        req.session.success_msg = "Invoice deleted successfully.";
-    } catch (err) {
-        req.session.error_msg = "Error deleting invoice.";
-    }
-    res.redirect('/sales/bill');
-});
-
-// ==========================================
-// 6. SALES PAYMENTS RECEIPTS ROUTES
-// ==========================================
-
-app.get('/sales/payment', requireAuth, async (req, res) => {
-    try {
-        const parties = await db.query("SELECT * FROM parties WHERE type IN ('Customer', 'Both') ORDER BY name ASC");
-        const banks = await db.query("SELECT * FROM banks");
-        const payments = await db.query(
-            `SELECT sp.*, p.name AS party_name, si.invoice_no 
-             FROM sales_payments sp 
-             JOIN parties p ON sp.party_id = p.id 
-             LEFT JOIN sales_invoices si ON sp.invoice_id = si.id 
-             ORDER BY sp.date DESC, sp.id DESC`
-        );
-
-        res.render('sales/payment', {
-            currentRoute: 'sales-payment',
-            parties,
-            banks,
-            payments,
-            todayDate: new Date().toISOString().split('T')[0]
-        });
-    } catch (err) {
-        res.redirect('/dashboard');
-    }
-});
-
-app.post('/sales/payment/add', requireAuth, async (req, res) => {
-    const { party_id, invoice_id, amount, date, payment_mode, reference_no, bank_id, notes } = req.body;
-    const amt = parseFloat(amount) || 0;
-
-    try {
-        // 1. Save sales payment receipt
-        const payResult = await db.runQuery(
-            `INSERT INTO sales_payments (party_id, invoice_id, amount, date, payment_mode, reference_no, bank_id, notes) 
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-            [party_id, invoice_id || null, amt, date, payment_mode, reference_no || null, bank_id || null, notes]
-        );
-
-        // 2. Reduce Customer outstanding balance (credit customer account: - amt)
-        await db.runQuery("UPDATE parties SET current_balance = current_balance - ? WHERE id = ?", [amt, party_id]);
-
-        const party = await db.getOne("SELECT name FROM parties WHERE id = ?", [party_id]);
-
-        // 3. Create cash/bank log entries
-        if (payment_mode === 'Cash') {
-            await db.runQuery(
-                `INSERT INTO cash_transactions (type, amount, date, party_id, payment_id, description) 
-                 VALUES ('Receipt', ?, ?, ?, ?, ?)`,
-                [amt, date, party_id, payResult.id, `Sale Receipt: ${party.name}`]
-            );
-        } else {
-            // Deposit to Bank Account (+)
-            await db.runQuery("UPDATE banks SET current_balance = current_balance + ? WHERE id = ?", [amt, bank_id]);
-            await db.runQuery(
-                `INSERT INTO bank_transactions (bank_id, type, amount, date, party_id, payment_id, reference_no, description) 
-                 VALUES (?, 'Deposit', ?, ?, ?, ?, ?, ?)`,
-                [bank_id, amt, date, party_id, payResult.id, reference_no, `Sale Receipt deposit: ${party.name}`]
-            );
-        }
-
-        req.session.success_msg = "Payment Receipt saved successfully!";
-    } catch (err) {
-        console.error(err);
-        req.session.error_msg = "Error recording payment.";
-    }
-    res.redirect('/sales/payment');
-});
-
-app.get('/sales/payment/delete/:id', requireAuth, async (req, res) => {
-    try {
-        const pay = await db.getOne("SELECT * FROM sales_payments WHERE id = ?", [req.params.id]);
-        if (!pay) return res.redirect('/sales/payment');
-
-        // 1. Revert Party current outstanding (debit party: + amount)
-        await db.runQuery("UPDATE parties SET current_balance = current_balance + ? WHERE id = ?", [pay.amount, pay.party_id]);
-
-        // 2. Revert cash/bank logs
-        if (pay.payment_mode === 'Cash') {
-            await db.runQuery("DELETE FROM cash_transactions WHERE payment_id = ?", [pay.id]);
-        } else {
-            await db.runQuery("UPDATE banks SET current_balance = current_balance - ? WHERE id = ?", [pay.amount, pay.bank_id]);
-            await db.runQuery("DELETE FROM bank_transactions WHERE payment_id = ?", [pay.id]);
-        }
-
-        await db.runQuery("DELETE FROM sales_payments WHERE id = ?", [pay.id]);
-        req.session.success_msg = "Payment Receipt deleted successfully.";
-    } catch (err) {
-        req.session.error_msg = "Error deleting payment receipt.";
-    }
-    res.redirect('/sales/payment');
-});
-
-// ==========================================
-// 7. PURCHASE MODULE ROUTES
-// ==========================================
-
-app.get('/purchase/bill', requireAuth, async (req, res) => {
-    try {
-        const invoices = await db.query(
-            `SELECT p.*, pt.name AS party_name 
-             FROM purchase_invoices p 
-             JOIN parties pt ON p.party_id = pt.id 
-             ORDER BY p.date DESC, p.id DESC`
-        );
-        res.render('purchases/bills_list', { currentRoute: 'purchase-bill', invoices });
-    } catch (err) {
-        res.redirect('/dashboard');
-    }
-});
-
-app.get('/purchase/bill/add', requireAuth, async (req, res) => {
-    try {
-        const companies = await db.query("SELECT * FROM companies");
-        const years = await db.query("SELECT * FROM financial_years");
-        const activeCompany = companies[0] || {};
-        const parties = await db.query("SELECT * FROM parties WHERE type IN ('Supplier', 'Both') ORDER BY name ASC");
-        const products = await db.query(
-            `SELECT p.*, t.rate_percent AS tax_rate, u.name AS unit_name 
-             FROM products p 
-             JOIN taxes t ON p.tax_id = t.id
-             JOIN units u ON p.unit_id = u.id`
-        );
-
-        res.render('purchases/bill_form', {
-            currentRoute: 'purchase-bill',
-            isEdit: false,
-            companies,
-            years,
-            activeCompany,
-            parties,
-            products,
-            todayDate: new Date().toISOString().split('T')[0]
-        });
-    } catch (err) {
-        res.redirect('/purchase/bill');
-    }
-});
-
-app.post('/purchase/bill/add', requireAuth, async (req, res) => {
-    const { company_id, party_id, financial_year_id, invoice_no, date, sub_total, tax_total, round_off, grand_total, notes, items } = req.body;
-    const billAmt = parseFloat(grand_total) || 0;
-
-    try {
-        // 1. Insert header
-        const header = await db.runQuery(
-            `INSERT INTO purchase_invoices (invoice_no, company_id, party_id, financial_year_id, date, sub_total, tax_total, round_off, grand_total, notes) 
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [invoice_no, company_id, party_id, financial_year_id, date, parseFloat(sub_total), parseFloat(tax_total), parseFloat(round_off), billAmt, notes]
-        );
-
-        const billId = header.id;
-
-        // 2. Insert items and increase stock IN (+)
-        if (items && typeof items === 'object') {
-            for (const key in items) {
-                const item = items[key];
-                if (!item.product_id) continue;
-
-                await db.runQuery(
-                    `INSERT INTO purchase_invoice_items (purchase_invoice_id, product_id, bags, quantity, rate, unit, amount, cgst_percent, cgst_amount, sgst_percent, sgst_amount, igst_percent, igst_amount, total) 
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                    [
-                        billId, item.product_id, parseInt(item.bags) || 0, parseFloat(item.quantity) || 0, parseFloat(item.rate) || 0, item.unit, parseFloat(item.amount) || 0,
-                        parseFloat(item.cgst_percent) || 0, parseFloat(item.cgst_amount) || 0, parseFloat(item.sgst_percent) || 0, parseFloat(item.sgst_amount) || 0,
-                        parseFloat(item.igst_percent) || 0, parseFloat(item.igst_amount) || 0, parseFloat(item.total) || 0
-                    ]
-                );
-
-                const qty = parseFloat(item.quantity) || 0;
-                await db.runQuery("UPDATE products SET current_stock = current_stock + ? WHERE id = ?", [qty, item.product_id]);
-                await db.runQuery(
-                    `INSERT INTO stock_ledger (product_id, type, qty, bags, date, reference_table, reference_id, description) 
-                     VALUES (?, 'IN', ?, ?, ?, 'purchase_invoice_items', ?, ?)`,
-                    [item.product_id, qty, parseInt(item.bags) || 0, date, billId, `Purchase Bill: ${invoice_no}`]
-                );
-            }
-        }
-
-        // 3. Update Supplier balance (Purchases increase supplier outstanding credits: - amt)
-        await db.runQuery("UPDATE parties SET current_balance = current_balance - ? WHERE id = ?", [billAmt, party_id]);
-
-        req.session.success_msg = "Purchase Bill saved successfully!";
-        res.redirect('/purchase/bill');
-    } catch (err) {
-        console.error(err);
-        res.redirect('/purchase/bill');
-    }
-});
-
-app.get('/purchase/bill/edit/:id', requireAuth, async (req, res) => {
-    try {
-        const invoice = await db.getOne("SELECT * FROM purchase_invoices WHERE id = ?", [req.params.id]);
-        if (!invoice) return res.redirect('/purchase/bill');
-
-        const companies = await db.query("SELECT * FROM companies");
-        const years = await db.query("SELECT * FROM financial_years");
-        const parties = await db.query("SELECT * FROM parties WHERE type IN ('Supplier', 'Both') ORDER BY name ASC");
-        const products = await db.query(
-            `SELECT p.*, t.rate_percent AS tax_rate, u.name AS unit_name 
-             FROM products p 
-             JOIN taxes t ON p.tax_id = t.id
-             JOIN units u ON p.unit_id = u.id`
-        );
-        const items = await db.query("SELECT * FROM purchase_invoice_items WHERE purchase_invoice_id = ?", [invoice.id]);
-        const activeCompany = companies.find(c => c.id === invoice.company_id) || companies[0];
-
-        res.render('purchases/bill_form', {
-            currentRoute: 'purchase-bill',
-            isEdit: true,
-            invoice,
-            companies,
-            years,
-            activeCompany,
-            parties,
-            products,
-            items,
-            todayDate: invoice.date
-        });
-    } catch (err) {
-        console.error(err);
-        res.redirect('/purchase/bill');
-    }
-});
-
-app.post('/purchase/bill/edit/:id', requireAuth, async (req, res) => {
-    const billId = req.params.id;
-    const { company_id, party_id, financial_year_id, invoice_no, date, sub_total, tax_total, round_off, grand_total, notes, items } = req.body;
-    const newBillAmt = parseFloat(grand_total) || 0;
-
-    try {
-        const oldBill = await db.getOne("SELECT * FROM purchase_invoices WHERE id = ?", [billId]);
-        const oldItems = await db.query("SELECT * FROM purchase_invoice_items WHERE purchase_invoice_id = ?", [billId]);
-
-        // Revert Supplier Balance & Stock IN
-        await db.runQuery("UPDATE parties SET current_balance = current_balance + ? WHERE id = ?", [oldBill.grand_total, oldBill.party_id]);
-        for (const item of oldItems) {
-            await db.runQuery("UPDATE products SET current_stock = current_stock - ? WHERE id = ?", [item.quantity, item.product_id]);
-        }
-        await db.runQuery("DELETE FROM stock_ledger WHERE reference_table = 'purchase_invoice_items' AND reference_id = ?", [billId]);
-
-        // Delete old items
-        await db.runQuery("DELETE FROM purchase_invoice_items WHERE purchase_invoice_id = ?", [billId]);
-
-        // Update purchase header
-        await db.runQuery(
-            `UPDATE purchase_invoices SET company_id=?, party_id=?, financial_year_id=?, invoice_no=?, date=?, sub_total=?, tax_total=?, round_off=?, grand_total=?, notes=? 
-             WHERE id=?`,
-            [company_id, party_id, financial_year_id, invoice_no, date, parseFloat(sub_total), parseFloat(tax_total), parseFloat(round_off), newBillAmt, notes, billId]
-        );
-
-        // Insert new items
-        if (items && typeof items === 'object') {
-            for (const key in items) {
-                const item = items[key];
-                if (!item.product_id) continue;
-
-                await db.runQuery(
-                    `INSERT INTO purchase_invoice_items (purchase_invoice_id, product_id, bags, quantity, rate, unit, amount, cgst_percent, cgst_amount, sgst_percent, sgst_amount, igst_percent, igst_amount, total) 
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                    [
-                        billId, item.product_id, parseInt(item.bags) || 0, parseFloat(item.quantity) || 0, parseFloat(item.rate) || 0, item.unit, parseFloat(item.amount) || 0,
-                        parseFloat(item.cgst_percent) || 0, parseFloat(item.cgst_amount) || 0, parseFloat(item.sgst_percent) || 0, parseFloat(item.sgst_amount) || 0,
-                        parseFloat(item.igst_percent) || 0, parseFloat(item.igst_amount) || 0, parseFloat(item.total) || 0
-                    ]
-                );
-
-                const qty = parseFloat(item.quantity) || 0;
-                await db.runQuery("UPDATE products SET current_stock = current_stock + ? WHERE id = ?", [qty, item.product_id]);
-                await db.runQuery(
-                    `INSERT INTO stock_ledger (product_id, type, qty, bags, date, reference_table, reference_id, description) 
-                     VALUES (?, 'IN', ?, ?, ?, 'purchase_invoice_items', ?, ?)`,
-                    [item.product_id, qty, parseInt(item.bags) || 0, date, billId, `Purchase Bill: ${invoice_no}`]
-                );
-            }
-        }
-
-        // Update supplier balance
-        await db.runQuery("UPDATE parties SET current_balance = current_balance - ? WHERE id = ?", [newBillAmt, party_id]);
-
-        req.session.success_msg = "Purchase Bill updated successfully.";
-        res.redirect('/purchase/bill');
-    } catch (err) {
-        console.error(err);
-        res.redirect('/purchase/bill');
-    }
-});
-
-app.get('/purchase/bill/delete/:id', requireAuth, async (req, res) => {
-    try {
-        const bill = await db.getOne("SELECT * FROM purchase_invoices WHERE id = ?", [req.params.id]);
-        const items = await db.query("SELECT * FROM purchase_invoice_items WHERE purchase_invoice_id = ?", [req.params.id]);
-
-        // Revert Supplier balance (debit supplier outstanding: + grand_total)
-        await db.runQuery("UPDATE parties SET current_balance = current_balance + ? WHERE id = ?", [bill.grand_total, bill.party_id]);
-        
-        // Revert stock level IN (-)
-        for (const item of items) {
-            await db.runQuery("UPDATE products SET current_stock = current_stock - ? WHERE id = ?", [item.quantity, item.product_id]);
-        }
-
-        await db.runQuery("DELETE FROM stock_ledger WHERE reference_table = 'purchase_invoice_items' AND reference_id = ?", [bill.id]);
-        await db.runQuery("DELETE FROM purchase_invoices WHERE id = ?", [req.params.id]);
-
-        req.session.success_msg = "Purchase invoice deleted.";
-    } catch (err) {
-        req.session.error_msg = "Error deleting purchase invoice.";
-    }
-    res.redirect('/purchase/bill');
-});
-
-// ==========================================
-// Purchase Outflow Payments Routes
-// ==========================================
-
-app.get('/purchase/payment', requireAuth, async (req, res) => {
-    try {
-        const parties = await db.query("SELECT * FROM parties WHERE type IN ('Supplier', 'Both') ORDER BY name ASC");
-        const banks = await db.query("SELECT * FROM banks");
-        const payments = await db.query(
-            `SELECT pp.*, p.name AS party_name, pi.invoice_no 
-             FROM purchase_payments pp 
-             JOIN parties p ON pp.party_id = p.id 
-             LEFT JOIN purchase_invoices pi ON pp.purchase_invoice_id = pi.id 
-             ORDER BY pp.date DESC, pp.id DESC`
-        );
-
-        res.render('purchases/payment', {
-            currentRoute: 'purchase-payment',
-            parties,
-            banks,
-            payments,
-            todayDate: new Date().toISOString().split('T')[0]
-        });
-    } catch (err) {
-        res.redirect('/dashboard');
-    }
-});
-
-app.post('/purchase/payment/add', requireAuth, async (req, res) => {
-    const { party_id, purchase_invoice_id, amount, date, payment_mode, reference_no, bank_id, notes } = req.body;
-    const amt = parseFloat(amount) || 0;
-
-    try {
-        // 1. Record payment outflow
-        const payResult = await db.runQuery(
-            `INSERT INTO purchase_payments (party_id, purchase_invoice_id, amount, date, payment_mode, reference_no, bank_id, notes) 
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-            [party_id, purchase_invoice_id || null, amt, date, payment_mode, reference_no || null, bank_id || null, notes]
-        );
-
-        // 2. Reduce supplier balance (debit supplier account: + amt)
-        await db.runQuery("UPDATE parties SET current_balance = current_balance + ? WHERE id = ?", [amt, party_id]);
-
-        const party = await db.getOne("SELECT name FROM parties WHERE id = ?", [party_id]);
-
-        // 3. Create cash/bank log
-        if (payment_mode === 'Cash') {
-            await db.runQuery(
-                `INSERT INTO cash_transactions (type, amount, date, party_id, purchase_payment_id, description) 
-                 VALUES ('Payment', ?, ?, ?, ?, ?)`,
-                [amt, date, party_id, payResult.id, `Supplier Payment: ${party.name}`]
-            );
-        } else {
-            // Withdraw from Bank Account (-)
-            await db.runQuery("UPDATE banks SET current_balance = current_balance - ? WHERE id = ?", [amt, bank_id]);
-            await db.runQuery(
-                `INSERT INTO bank_transactions (bank_id, type, amount, date, party_id, purchase_payment_id, reference_no, description) 
-                 VALUES (?, 'Withdrawal', ?, ?, ?, ?, ?, ?)`,
-                [bank_id, amt, date, party_id, payResult.id, reference_no, `Supplier Payment: ${party.name}`]
-            );
-        }
-
-        req.session.success_msg = "Purchase Payment recorded successfully!";
-    } catch (err) {
-        console.error(err);
-        req.session.error_msg = "Error recording payment.";
-    }
-    res.redirect('/purchase/payment');
-});
-
-app.get('/purchase/payment/delete/:id', requireAuth, async (req, res) => {
-    try {
-        const pay = await db.getOne("SELECT * FROM purchase_payments WHERE id = ?", [req.params.id]);
-        if (!pay) return res.redirect('/purchase/payment');
-
-        // 1. Revert Supplier balance (credit supplier: - amount)
-        await db.runQuery("UPDATE parties SET current_balance = current_balance - ? WHERE id = ?", [pay.amount, pay.party_id]);
-
-        // 2. Revert cash/bank logs
-        if (pay.payment_mode === 'Cash') {
-            await db.runQuery("DELETE FROM cash_transactions WHERE purchase_payment_id = ?", [pay.id]);
-        } else {
-            await db.runQuery("UPDATE banks SET current_balance = current_balance + ? WHERE id = ?", [pay.amount, pay.bank_id]);
-            await db.runQuery("DELETE FROM bank_transactions WHERE purchase_payment_id = ?", [pay.id]);
-        }
-
-        await db.runQuery("DELETE FROM purchase_payments WHERE id = ?", [pay.id]);
-        req.session.success_msg = "Purchase Payment deleted.";
-    } catch (err) {
-        req.session.error_msg = "Error deleting payment.";
-    }
-    res.redirect('/purchase/payment');
-});
-
-// ==========================================
-// 8. TRANSACTIONS RECORDS ROUTES
-// ==========================================
-
-app.get('/transactions/cash', requireAuth, async (req, res) => {
-    try {
-        const transactions = await db.query(
-            `SELECT ct.*, p.name AS party_name 
-             FROM cash_transactions ct 
-             LEFT JOIN parties p ON ct.party_id = p.id 
-             ORDER BY ct.date ASC, ct.id ASC`
-        );
-        
-        // Sum totals
-        const receipts = await db.getOne("SELECT SUM(amount) AS total FROM cash_transactions WHERE type='Receipt'");
-        const payments = await db.getOne("SELECT SUM(amount) AS total FROM cash_transactions WHERE type='Payment'");
-        const totalReceipts = receipts && receipts.total ? receipts.total : 0.0;
-        const totalPayments = payments && payments.total ? payments.total : 0.0;
-
-        res.render('transactions/cash', {
-            currentRoute: 'cash-records',
-            transactions,
-            stats: {
-                totalReceipts,
-                totalPayments,
-                netCash: totalReceipts - totalPayments
-            }
-        });
-    } catch (err) {
-        res.redirect('/dashboard');
-    }
-});
-
-app.get('/transactions/bank', requireAuth, async (req, res) => {
-    try {
-        const banks = await db.query("SELECT * FROM banks");
-        if (banks.length === 0) return res.redirect('/settings/bank');
-
-        const activeBankId = req.query.bank_id || banks[0].id;
-        const activeBank = banks.find(b => b.id == activeBankId) || banks[0];
-
-        const transactions = await db.query(
-            `SELECT bt.*, p.name AS party_name 
-             FROM bank_transactions bt 
-             LEFT JOIN parties p ON bt.party_id = p.id 
-             WHERE bt.bank_id = ? 
-             ORDER BY bt.date ASC, bt.id ASC`,
-            [activeBank.id]
-        );
-
-        res.render('transactions/bank', {
-            currentRoute: 'bank-records',
-            banks,
-            activeBank,
-            transactions
-        });
-    } catch (err) {
-        res.redirect('/dashboard');
-    }
-});
-
-// ==========================================
-// 9. STOCK LEDGER ROUTE
-// ==========================================
-
-app.get('/stock', requireAuth, async (req, res) => {
-    try {
-        // Query product details aggregated with stock_ledger IN/OUT entries
-        const stockItems = await db.query(
-            `SELECT p.*, u.name AS unit_name,
-               (SELECT SUM(qty) FROM stock_ledger WHERE product_id = p.id AND type='IN') AS in_qty,
-               (SELECT SUM(qty) FROM stock_ledger WHERE product_id = p.id AND type='OUT') AS out_qty
-             FROM products p
-             JOIN units u ON p.unit_id = u.id
-             ORDER BY p.name ASC`
-        );
-        res.render('stock/list', { currentRoute: 'stock', stockItems });
-    } catch (err) {
-        res.redirect('/dashboard');
-    }
-});
-
-// ==========================================
-// 10. REPORTS VIEWS ROUTES
-// ==========================================
-
-app.get('/reports', requireAuth, (req, res) => {
-    res.render('reports/index', { currentRoute: 'reports' });
-});
-
-// Sales Register Report
-app.get('/reports/sales-register', requireAuth, async (req, res) => {
-    const { start_date, end_date, party_id } = req.query;
-    
-    // Set default dates if empty (start of active year to now)
-    const startDate = start_date || '2026-04-01';
-    const endDate = end_date || new Date().toISOString().split('T')[0];
-
-    try {
-        const parties = await db.query("SELECT id, name FROM parties ORDER BY name ASC");
-        
-        let query = `
-            SELECT s.*, p.name AS party_name, c.name AS company_name 
-            FROM sales_invoices s 
-            JOIN parties p ON s.party_id = p.id 
-            JOIN companies c ON s.company_id = c.id
-            WHERE s.date >= ? AND s.date <= ? AND s.is_draft = 0
-        `;
-        const params = [startDate, endDate];
-        if (party_id) {
-            query += " AND s.party_id = ?";
-            params.push(party_id);
-        }
-        query += " ORDER BY s.date DESC";
-
-        const invoices = await db.query(query, params);
-
-        res.render('reports/sales_purchase', {
-            currentRoute: 'reports',
-            reportType: 'sales',
-            parties,
-            invoices,
-            filters: { start_date: startDate, end_date: endDate, party_id }
-        });
-    } catch (err) {
-        res.redirect('/reports');
-    }
-});
-
-// Purchase Register Report
-app.get('/reports/purchase-register', requireAuth, async (req, res) => {
-    const { start_date, end_date, party_id } = req.query;
-    const startDate = start_date || '2026-04-01';
-    const endDate = end_date || new Date().toISOString().split('T')[0];
-
-    try {
-        const parties = await db.query("SELECT id, name FROM parties ORDER BY name ASC");
-        
-        let query = `
-            SELECT p.*, pt.name AS party_name, c.name AS company_name 
-            FROM purchase_invoices p 
-            JOIN parties pt ON p.party_id = pt.id 
-            JOIN companies c ON p.company_id = c.id
-            WHERE p.date >= ? AND p.date <= ?
-        `;
-        const params = [startDate, endDate];
-        if (party_id) {
-            query += " AND p.party_id = ?";
-            params.push(party_id);
-        }
-        query += " ORDER BY p.date DESC";
-
-        const invoices = await db.query(query, params);
-
-        res.render('reports/sales_purchase', {
-            currentRoute: 'reports',
-            reportType: 'purchase',
-            parties,
-            invoices,
-            filters: { start_date: startDate, end_date: endDate, party_id }
-        });
-    } catch (err) {
-        res.redirect('/reports');
-    }
-});
-
-// Party Ledger Report
-app.get('/reports/party-ledger', requireAuth, async (req, res) => {
-    const { party_id, start_date, end_date } = req.query;
-    const startDate = start_date || '2026-04-01';
-    const endDate = end_date || new Date().toISOString().split('T')[0];
-
-    try {
-        const parties = await db.query("SELECT id, name, type FROM parties ORDER BY name ASC");
-        let activeParty = null;
-        let openingBalance = 0;
-        let transactions = [];
-
-        if (party_id) {
-            activeParty = await db.getOne("SELECT * FROM parties WHERE id = ?", [party_id]);
-            
-            // Calculate transactions prior to start date for Opening Balance
-            // Opening balance in table + prior debits - prior credits
-            const salesPrior = await db.getOne("SELECT SUM(grand_total) AS total FROM sales_invoices WHERE party_id = ? AND date < ? AND is_draft = 0", [party_id, startDate]);
-            const receiptsPrior = await db.getOne("SELECT SUM(amount) AS total FROM sales_payments WHERE party_id = ? AND date < ?", [party_id, startDate]);
-            const purchasesPrior = await db.getOne("SELECT SUM(grand_total) AS total FROM purchase_invoices WHERE party_id = ? AND date < ?", [party_id, startDate]);
-            const paymentsPrior = await db.getOne("SELECT SUM(amount) AS total FROM purchase_payments WHERE party_id = ? AND date < ?", [party_id, startDate]);
-
-            const sPrior = salesPrior && salesPrior.total ? salesPrior.total : 0.0;
-            const rPrior = receiptsPrior && receiptsPrior.total ? receiptsPrior.total : 0.0;
-            const pPrior = purchasesPrior && purchasesPrior.total ? purchasesPrior.total : 0.0;
-            const payPrior = paymentsPrior && paymentsPrior.total ? paymentsPrior.total : 0.0;
-
-            const initialBal = activeParty.opening_balance * (activeParty.balance_type === 'Dr' ? 1 : -1);
-            
-            // Net balance prior to start date
-            openingBalance = initialBal + (sPrior - rPrior) - (pPrior - payPrior);
-
-            // Fetch transactions in date range
-            // Unified query
-            const salesTrans = await db.query(
-                `SELECT date, 'Sales Invoice' AS voucher_type, invoice_no AS ref_no, 'Goods sold' AS description, grand_total AS debit, 0.0 AS credit 
-                 FROM sales_invoices 
-                 WHERE party_id = ? AND date >= ? AND date <= ? AND is_draft = 0`,
-                [party_id, startDate, endDate]
-            );
-
-            const receiptsTrans = await db.query(
-                `SELECT date, 'Receipt Voucher' AS voucher_type, reference_no AS ref_no, 'Payment received' AS description, 0.0 AS debit, amount AS credit 
-                 FROM sales_payments 
-                 WHERE party_id = ? AND date >= ? AND date <= ?`,
-                [party_id, startDate, endDate]
-            );
-
-            const purchaseTrans = await db.query(
-                `SELECT date, 'Purchase Bill' AS voucher_type, invoice_no AS ref_no, 'Goods purchased' AS description, 0.0 AS debit, grand_total AS credit 
-                 FROM purchase_invoices 
-                 WHERE party_id = ? AND date >= ? AND date <= ?`,
-                [party_id, startDate, endDate]
-            );
-
-            const paymentsTrans = await db.query(
-                `SELECT date, 'Payment Voucher' AS voucher_type, reference_no AS ref_no, 'Payment sent to supplier' AS description, amount AS debit, 0.0 AS credit 
-                 FROM purchase_payments 
-                 WHERE party_id = ? AND date >= ? AND date <= ?`,
-                [party_id, startDate, endDate]
-            );
-
-            // Merge and sort by date chronological
-            transactions = [...salesTrans, ...receiptsTrans, ...purchaseTrans, ...paymentsTrans];
-            transactions.sort((a, b) => new Date(a.date) - new Date(b.date));
-        }
-
-        res.render('reports/party_ledger', {
-            currentRoute: 'reports',
-            parties,
-            activeParty,
-            openingBalance,
-            transactions,
-            filters: { party_id, start_date: startDate, end_date: endDate }
-        });
-    } catch (err) {
-        console.error(err);
-        res.redirect('/reports');
-    }
-});
-
-// GST Summary Report
-app.get('/reports/gst-summary', requireAuth, async (req, res) => {
-    const { start_date, end_date } = req.query;
-    const startDate = start_date || '2026-04-01';
-    const endDate = end_date || new Date().toISOString().split('T')[0];
-
-    try {
-        // Query Outward (Sales GSTR-1 details)
-        const outwardItems = await db.query(
-            `SELECT s.invoice_no, s.date, s.grand_total, s.sub_total AS taxable_value, s.tax_total, p.name AS party_name, p.gstin AS party_gstin,
-                    (SELECT SUM(cgst_amount) FROM sales_invoice_items WHERE invoice_id = s.id) AS cgst_amount,
-                    (SELECT SUM(sgst_amount) FROM sales_invoice_items WHERE invoice_id = s.id) AS sgst_amount,
-                    (SELECT SUM(igst_amount) FROM sales_invoice_items WHERE invoice_id = s.id) AS igst_amount
-             FROM sales_invoices s
-             JOIN parties p ON s.party_id = p.id
-             WHERE s.date >= ? AND s.date <= ? AND s.is_draft = 0`,
-            [startDate, endDate]
-        );
-
-        // Query Inward (Purchase GSTR-2 details)
-        const inwardItems = await db.query(
-            `SELECT s.invoice_no, s.date, s.grand_total, s.sub_total AS taxable_value, s.tax_total, p.name AS party_name, p.gstin AS party_gstin,
-                    (SELECT SUM(cgst_amount) FROM purchase_invoice_items WHERE purchase_invoice_id = s.id) AS cgst_amount,
-                    (SELECT SUM(sgst_amount) FROM purchase_invoice_items WHERE purchase_invoice_id = s.id) AS sgst_amount,
-                    (SELECT SUM(igst_amount) FROM purchase_invoice_items WHERE purchase_invoice_id = s.id) AS igst_amount
-             FROM purchase_invoices s
-             JOIN parties p ON s.party_id = p.id
-             WHERE s.date >= ? AND s.date <= ?`,
-            [startDate, endDate]
-        );
-
-        // Aggregate outward totals
-        let outwardTotals = { taxable: 0, cgst: 0, sgst: 0, igst: 0, gst: 0 };
-        outwardItems.forEach(it => {
-            outwardTotals.taxable += it.taxable_value;
-            outwardTotals.cgst += it.cgst_amount || 0;
-            outwardTotals.sgst += it.sgst_amount || 0;
-            outwardTotals.igst += it.igst_amount || 0;
-        });
-        outwardTotals.gst = outwardTotals.cgst + outwardTotals.sgst + outwardTotals.igst;
-
-        // Aggregate inward totals
-        let inwardTotals = { taxable: 0, cgst: 0, sgst: 0, igst: 0, gst: 0 };
-        inwardItems.forEach(it => {
-            inwardTotals.taxable += it.taxable_value;
-            inwardTotals.cgst += it.cgst_amount || 0;
-            inwardTotals.sgst += it.sgst_amount || 0;
-            inwardTotals.igst += it.igst_amount || 0;
-        });
-        inwardTotals.gst = inwardTotals.cgst + inwardTotals.sgst + inwardTotals.igst;
-
-        res.render('reports/gst_summary', {
-            currentRoute: 'reports',
-            outwardItems,
-            inwardItems,
-            outwardTotals,
-            inwardTotals,
-            filters: { start_date: startDate, end_date: endDate }
-        });
-    } catch (err) {
-        console.error(err);
-        res.redirect('/reports');
-    }
-});
-
-// Outstanding Balance Report
-app.get('/reports/outstanding', requireAuth, async (req, res) => {
-    try {
-        const parties = await db.query("SELECT * FROM parties WHERE current_balance != 0 ORDER BY name ASC");
-        
-        // Sum total Dr (Receivable) and total Cr (Payable)
-        const rec = await db.getOne("SELECT SUM(current_balance) AS total FROM parties WHERE current_balance > 0");
-        const pay = await db.getOne("SELECT SUM(current_balance) AS total FROM parties WHERE current_balance < 0");
-
-        res.render('reports/outstanding', {
-            currentRoute: 'reports',
-            parties,
-            totalReceivables: rec && rec.total ? rec.total : 0.0,
-            totalPayables: pay && pay.total ? Math.abs(pay.total) : 0.0
-        });
-    } catch (err) {
-        res.redirect('/reports');
-    }
-});
-
-// ==========================================
-// 11. SETTINGS CRUD ROUTES
-// ==========================================
-
-// Years Configuration
-app.get('/settings/year', requireAuth, async (req, res) => {
-    try {
-        const years = await db.query("SELECT * FROM financial_years ORDER BY name DESC");
-        res.render('settings/year', { currentRoute: 'settings-year', years });
-    } catch (err) {
-        res.redirect('/dashboard');
-    }
-});
-
-app.post('/settings/year/add', requireAuth, async (req, res) => {
-    const { name } = req.body;
-    try {
-        await db.runQuery("INSERT INTO financial_years (name) VALUES (?)", [name]);
-        req.session.success_msg = "Financial Year registered successfully!";
-    } catch (err) {
-        req.session.error_msg = "Year already exists or format is invalid.";
-    }
-    res.redirect('/settings/year');
-});
-
-app.get('/settings/year/activate/:id', requireAuth, async (req, res) => {
-    try {
-        // Set all inactive first, then active specific
-        await db.runQuery("UPDATE financial_years SET is_active = 0");
-        await db.runQuery("UPDATE financial_years SET is_active = 1 WHERE id = ?", [req.params.id]);
-        req.session.success_msg = "Financial Year activated!";
-    } catch (err) {
-        req.session.error_msg = "Could not activate year.";
-    }
-    res.redirect('/settings/year');
-});
-
-app.get('/settings/year/delete/:id', requireAuth, async (req, res) => {
-    try {
-        await db.runQuery("DELETE FROM financial_years WHERE id = ? AND is_active = 0", [req.params.id]);
-        req.session.success_msg = "Year deleted.";
-    } catch (err) {
-        req.session.error_msg = "Active year cannot be deleted.";
-    }
-    res.redirect('/settings/year');
-});
-
-// Units Configuration
-app.get('/settings/unit', requireAuth, async (req, res) => {
-    try {
-        const units = await db.query("SELECT * FROM units ORDER BY name ASC");
-        res.render('settings/unit', { currentRoute: 'settings-unit', units });
-    } catch (err) {
-        res.redirect('/dashboard');
-    }
-});
-
-app.post('/settings/unit/add', requireAuth, async (req, res) => {
-    try {
-        await db.runQuery("INSERT INTO units (name) VALUES (?)", [req.body.name]);
-        req.session.success_msg = "Measurement Unit added.";
-    } catch (err) {
-        req.session.error_msg = "Unit already exists.";
-    }
-    res.redirect('/settings/unit');
-});
-
-app.get('/settings/unit/delete/:id', requireAuth, async (req, res) => {
-    try {
-        await db.runQuery("DELETE FROM units WHERE id = ?", [req.params.id]);
-        req.session.success_msg = "Unit deleted.";
-    } catch (err) {
-        req.session.error_msg = "Cannot delete unit linked to product items.";
-    }
-    res.redirect('/settings/unit');
-});
-
-// Company Settings Configuration
-app.get('/settings/company', requireAuth, async (req, res) => {
-    try {
-        const company = await db.getOne("SELECT * FROM companies LIMIT 1");
-        res.render('settings/company', { currentRoute: 'settings-company', company });
-    } catch (err) {
-        res.redirect('/dashboard');
-    }
-});
-
-app.post('/settings/company/save', requireAuth, async (req, res) => {
-    const { id, name, address, gstin, phone, email, bank_name, bank_ac_no, bank_ifsc, bank_branch, invoice_prefix } = req.body;
-    try {
-        await db.runQuery(
-            `UPDATE companies SET name=?, address=?, gstin=?, phone=?, email=?, bank_name=?, bank_ac_no=?, bank_ifsc=?, bank_branch=?, invoice_prefix=? 
-             WHERE id = ?`,
-            [name, address, gstin, phone, email, bank_name, bank_ac_no, bank_ifsc, bank_branch, invoice_prefix, id]
-        );
-        req.session.success_msg = "Company profile details updated successfully!";
-    } catch (err) {
-        req.session.error_msg = "Error saving company profile.";
-    }
-    res.redirect('/settings/company');
-});
-
-// Taxes Configuration
-app.get('/settings/tax', requireAuth, async (req, res) => {
-    try {
-        const taxes = await db.query("SELECT * FROM taxes ORDER BY rate_percent ASC");
-        res.render('settings/tax', { currentRoute: 'settings-tax', taxes });
-    } catch (err) {
-        res.redirect('/dashboard');
-    }
-});
-
-app.post('/settings/tax/add', requireAuth, async (req, res) => {
-    const { name, rate_percent } = req.body;
-    try {
-        await db.runQuery("INSERT INTO taxes (name, rate_percent) VALUES (?, ?)", [name, parseFloat(rate_percent)]);
-        req.session.success_msg = "Tax slab created.";
-    } catch (err) {
-        req.session.error_msg = "Tax slab already exists.";
-    }
-    res.redirect('/settings/tax');
-});
-
-app.get('/settings/tax/delete/:id', requireAuth, async (req, res) => {
-    try {
-        await db.runQuery("DELETE FROM taxes WHERE id = ?", [req.params.id]);
-        req.session.success_msg = "Tax slab deleted.";
-    } catch (err) {
-        req.session.error_msg = "Cannot delete slab linked to product master.";
-    }
-    res.redirect('/settings/tax');
-});
-
-// Banks accounts Configuration
-app.get('/settings/bank', requireAuth, async (req, res) => {
-    try {
-        const banks = await db.query("SELECT * FROM banks ORDER BY name ASC");
-        res.render('settings/bank', { currentRoute: 'settings-bank', banks });
-    } catch (err) {
-        res.redirect('/dashboard');
-    }
-});
-
-app.post('/settings/bank/add', requireAuth, async (req, res) => {
-    const { name, ac_no, ifsc, branch, opening_balance } = req.body;
-    const opBal = parseFloat(opening_balance) || 0;
-    try {
-        await db.runQuery(
-            "INSERT INTO banks (name, ac_no, ifsc, branch, opening_balance, current_balance) VALUES (?, ?, ?, ?, ?, ?)",
-            [name, ac_no, ifsc, branch, opBal, opBal]
-        );
-        req.session.success_msg = "Bank account registered successfully!";
-    } catch (err) {
-        req.session.error_msg = "Error registering bank account.";
-    }
-    res.redirect('/settings/bank');
-});
-
-app.get('/settings/bank/delete/:id', requireAuth, async (req, res) => {
-    try {
-        await db.runQuery("DELETE FROM banks WHERE id = ?", [req.params.id]);
-        req.session.success_msg = "Bank account deleted.";
-    } catch (err) {
-        req.session.error_msg = "Cannot delete bank account with history.";
-    }
-    res.redirect('/settings/bank');
-});
-
-// Backup Download: Serves SQLite db file download directly!
-app.get('/settings/backup', requireAuth, (req, res) => {
-    const dbFile = path.join(__dirname, 'db', 'vsplastic.db');
-    if (fs.existsSync(dbFile)) {
-        res.download(dbFile, `vsplastic_backup_${new Date().toISOString().slice(0,10)}.db`);
-    } else {
-        req.session.error_msg = "Backup file not found.";
-        res.redirect('/dashboard');
-    }
-});
-
-// ==========================================
-// 12. AJAX HELPER APIS
-// ==========================================
-
-app.get('/api/party/:id', requireAuth, async (req, res) => {
-    try {
-        const party = await db.getOne("SELECT * FROM parties WHERE id = ?", [req.params.id]);
-        res.json(party);
-    } catch (err) {
-        res.status(500).json({ error: "DB error" });
-    }
-});
-
-app.get('/api/product/:id', requireAuth, async (req, res) => {
-    try {
-        const product = await db.getOne(
-            `SELECT p.*, t.rate_percent AS tax_rate, u.name AS unit_name 
-             FROM products p 
-             JOIN taxes t ON p.tax_id = t.id 
-             JOIN units u ON p.unit_id = u.id 
-             WHERE p.id = ?`,
-            [req.params.id]
-        );
-        res.json(product);
-    } catch (err) {
-        res.status(500).json({ error: "DB error" });
-    }
-});
-
-app.get('/api/outstanding-invoices/:partyId', requireAuth, async (req, res) => {
-    try {
-        // Query unpaid/partially paid sales invoices for party
-        const invoices = await db.query(
-            `SELECT si.id, si.invoice_no, si.grand_total,
-               (si.grand_total - COALESCE((SELECT SUM(amount) FROM sales_payments WHERE invoice_id = si.id), 0)) AS outstanding
-             FROM sales_invoices si
-             WHERE si.party_id = ? AND si.is_draft = 0
-             HAVING outstanding > 0`,
-            [req.params.partyId]
-        );
-        res.json(invoices);
-    } catch (err) {
-        // Fallback for standard SQLite that might complain about HAVING without GROUP BY in some versions
-        try {
-            const allInvoices = await db.query(
-                `SELECT si.id, si.invoice_no, si.grand_total 
-                 FROM sales_invoices si 
-                 WHERE si.party_id = ? AND si.is_draft = 0`,
-                [req.params.partyId]
-            );
-            
-            const filtered = [];
-            for (const inv of allInvoices) {
-                const paidObj = await db.getOne("SELECT SUM(amount) AS total FROM sales_payments WHERE invoice_id = ?", [inv.id]);
-                const paid = paidObj ? paidObj.total || 0 : 0;
-                if (inv.grand_total - paid > 0) {
-                    filtered.push(inv);
-                }
-            }
-            res.json(filtered);
-        } catch (innerErr) {
-            res.status(500).json({ error: "DB error" });
-        }
-    }
-});
-
-app.get('/api/outstanding-purchase-invoices/:partyId', requireAuth, async (req, res) => {
-    try {
-        const invoices = await db.query(
-            `SELECT pi.id, pi.invoice_no, pi.grand_total
-             FROM purchase_invoices pi
-             WHERE pi.party_id = ?`,
-            [req.params.partyId]
-        );
-        res.json(invoices);
-    } catch (err) {
-        res.status(500).json({ error: "DB error" });
-    }
-});
-
-app.get('/api/next-invoice-number', requireAuth, async (req, res) => {
-    const { type, company_id } = req.query;
-    try {
-        const company = await db.getOne("SELECT invoice_prefix FROM companies WHERE id = ?", [company_id]);
-        const prefix = company ? company.invoice_prefix : 'VS';
-        
-        let count;
-        if (type === 'Invoice') {
-            count = await db.getOne("SELECT COUNT(*) AS count FROM sales_invoices WHERE type='Invoice'");
-        } else {
-            count = await db.getOne("SELECT COUNT(*) AS count FROM sales_invoices WHERE type='Challan'");
-        }
-        
-        const nextNum = (count.count + 1).toString().padStart(4, '0');
-        const code = type === 'Invoice' ? 'INV' : 'CHL';
-        res.json({ number: `${prefix}/${code}/${nextNum}` });
-    } catch (err) {
-        res.status(500).json({ error: "DB error" });
-    }
-});
-
-// Start Server
-app.listen(PORT, () => {
-    console.log(`VS Plastic ERP PWA server running on http://localhost:${PORT}`);
-});
+async function start() {
+  await db.migrate();
+  if (
+    process.env.ADMIN_EMAIL &&
+    process.env.ADMIN_PASSWORD &&
+    !(await db.one("SELECT id FROM w_users WHERE role='admin'"))
+  ) {
+    const password = await d.hash(process.env.ADMIN_PASSWORD);
+    await db.run(
+      "INSERT INTO w_users (email,password,role,status,business,contact,phone,business_type,city,state,pincode,address,created_at) VALUES (?,?,'admin','approved',?,?,?,?,?,?,?,?,?)",
+      [
+        process.env.ADMIN_EMAIL.toLowerCase(),
+        password,
+        "VS Curtain Accessories",
+        "Administrator",
+        "",
+        "Other",
+        "Ahmedabad",
+        "Gujarat",
+        "380001",
+        "Ahmedabad",
+        d.now(),
+      ],
+    );
+  }
+  if (
+    production &&
+    !(await db.one("SELECT id FROM w_users WHERE role='admin'"))
+  )
+    throw new Error(
+      "Set ADMIN_EMAIL and ADMIN_PASSWORD to create the first administrator.",
+    );
+  return app.listen(
+    process.env.PORT ||
+      (process.argv.includes("--port")
+        ? Number(process.argv[process.argv.indexOf("--port") + 1])
+        : 3001),
+    () => console.log("Wholesale platform listening on configured port."),
+  );
+}
+if (require.main === module)
+  start().catch((e) => {
+    console.error("Startup failed:", e.message);
+    process.exit(1);
+  });
+module.exports = { app, start, db };

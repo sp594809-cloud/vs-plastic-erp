@@ -1,23 +1,21 @@
 {
   "name": "vs-plastic-erp",
   "version": "1.0.0",
-  "description": "Replica of VS Plastic ERP billing & inventory software as a PWA",
+  "description": "B2B curtain accessories ordering platform using the existing TiDB connection",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node --watch server.js"
+    "dev": "node --watch server.js",
+    "test": "node --test tests/wholesale.test.js"
   },
   "dependencies": {
-    "body-parser": "^1.20.3",
-    "dotenv": "^17.4.2",
-    "ejs": "^3.1.10",
-    "express": "^4.21.0",
-    "express-session": "^1.18.0",
-    "mysql2": "^3.24.2",
-    "sqlite3": "^5.1.7"
+    "dotenv": "17.4.2",
+    "ejs": "3.1.10",
+    "express": "4.22.3",
+    "mysql2": "3.24.2"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=22.13.0"
   },
   "private": true
 }
