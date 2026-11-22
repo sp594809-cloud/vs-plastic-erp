@@ -1,0 +1,25 @@
+name: Smart Khata verification
+on:
+  pull_request:
+    paths:
+      - '.gemini/antigravity/scratch/vs-plastic-erp/**'
+      - '.github/workflows/smart-khata.yml'
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: .gemini/antigravity/scratch/vs-plastic-erp
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci
+      - run: npm test
+      - run: npm install --prefix "$RUNNER_TEMP/khata-browser" playwright
+      - run: |
+          "$RUNNER_TEMP/khata-browser/node_modules/.bin/playwright" install --with-deps chromium
+      - run: NODE_PATH="$RUNNER_TEMP/khata-browser/node_modules" node tests/khata-browser.cjs
