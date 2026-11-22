@@ -592,6 +592,7 @@ app.get("/policies/:type", (req, res) => {
     body: req.settings[req.params.type],
   });
 });
+require("./wholesale/khata-routes").mount(app, db, wrap);
 app.use("/admin", admin);
 app.get(
   "/admin",
@@ -1206,3 +1207,4 @@ if (require.main === module)
     process.exit(1);
   });
 module.exports = { app, start, db };
+
