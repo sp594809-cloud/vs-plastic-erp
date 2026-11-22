@@ -75,3 +75,9 @@ test("targeted allocations and due-date extensions change open-invoice reminder 
  await handlers(db)["POST /khata/:id/extend"]({params:{id:"1"},user:{role:"admin",id:2},body:{sale:"1",reason:"Agreed revised terms",due:k.later(k.today(),5)}},{redirect(){}});
  assert.equal(candidate(await all(),[],k.today(),[0]).entry.id,2);
 });
+test("only an owner can write off an overdue amount with a reason",async()=>{
+ const {add,rows}=setup();await add("sale","200",{posted:"2025-01-01",due:"2025-01-02"});
+ await assert.rejects(add("write_off","50",{note:"Review"},{role:"accountant",id:2}));
+ await assert.rejects(add("write_off","201",{note:"Too large"}));
+ await add("write_off","50",{note:"Documented decision"});assert.equal(k.summary(await rows()).balance,15000);
+});

@@ -135,7 +135,8 @@ async function post(db,user,id,b){
           return "Credit approval requested";
         }
       }else{
-        if(!["payment","refund","credit_note"].includes(kind)||!["admin","accountant"].includes(user.role))fail("Accounting access required.",403);
+        if(!["payment","refund","credit_note","write_off"].includes(kind)||!["admin","accountant"].includes(user.role))fail("Accounting access required.",403);
+        if(kind==="write_off"&&(user.role!=="admin"||value>state.overdue))fail("Owner approval and sufficient overdue balance required.",403);
         if(kind!=="payment"&&!note)fail("Record the reason.");
         if(kind==="refund"&&value>Math.max(0,-state.balance))fail("Refund exceeds available advance.");
         if(kind==="payment"||kind==="refund"){

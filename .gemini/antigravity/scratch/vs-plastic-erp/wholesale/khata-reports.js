@@ -1,6 +1,6 @@
 const {today,summary,date,loadEntries}=require("./khata");
 const {ledger}=require("./khata-routes");
-const labels=["Shop","City","Category","Staff ID","Credit sales (INR)","Payments (INR)","Outstanding (INR)","Overdue (INR)","Oldest overdue (days)","Average collection (days)","On time (%)"];
+const labels=["Shop","City","Category","Staff ID","Credit sales (INR)","Payments (INR)","Outstanding (INR)","Overdue (INR)","Oldest overdue (days)","Average collection (days)","On time (%)","Write-offs (INR)","Late payments recovered (INR)","Average reorder interval (days)","Last purchase","Last payment"];
 const xml=s=>String(s??"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;");
 function exportRows(res,format,name,rows){
  if(format==="excel"){
@@ -23,12 +23,18 @@ function register(app,db,wrap){
   const rows=[];
   for(const c of users){
    const entries=await loadEntries(db,c.id,to);
-   const state=summary(entries,to);let sales=0,payments=0;
+   const state=summary(entries,to);let sales=0,payments=0,writeOff=0,recovered=0;
+   const byId=new Map(entries.map(e=>[e.id,e]));
+   for(const a of state.allocations){
+    const debit=byId.get(a.debit),credit=byId.get(a.credit);
+    if(credit.kind==="payment"&&credit.posted>=from&&debit.kind==="sale"&&debit.due<credit.posted)recovered+=a.amount;
+   }
    for(const r of ledger(entries).filter(e=>e.posted>=from)){
     const kind=r.kind==="reversal"?entries.find(e=>e.id===r.original).kind:r.kind;
+    if(kind==="write_off")writeOff-=r.delta;
     if(kind==="sale")sales+=r.delta;if(kind==="payment")payments-=r.delta;
    }
-   rows.push([c.business,c.city,c.business_type,c.assigned||"",sales/100,payments/100,state.balance/100,state.overdue/100,state.maxDays,state.history.average,state.history.onTime]);
+   rows.push([c.business,c.city,c.business_type,c.assigned||"",sales/100,payments/100,state.balance/100,state.overdue/100,state.maxDays,state.history.average,state.history.onTime,writeOff/100,recovered/100,state.history.repeat,state.history.lastSale,state.history.lastPayment]);
   }
   if(["csv","excel"].includes(q.format))return exportRows(res,q.format,"khata-report",[labels,...rows]);
   res.render("khata-report",{labels,rows,q,from,to});
