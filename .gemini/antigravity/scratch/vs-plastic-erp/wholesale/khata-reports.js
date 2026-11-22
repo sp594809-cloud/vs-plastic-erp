@@ -16,10 +16,10 @@ function register(app,db,wrap){
   if(from>to)throw Object.assign(new Error("Date range is reversed."),{status:400});
   const clauses=["u.role='customer'"],args=[];
   if(["manager","salesperson"].includes(user.role)){clauses.push("p.assigned=?");args.push(user.id);}
-  for(const [key,col] of [["city","u.city"],["category","u.business_type"],["assigned","p.assigned"]]){
+  for(const [key,col] of [["city","u.city"],["area","h.area"],["category","u.business_type"],["assigned","p.assigned"]]){
    if(q[key]){clauses.push(col+"=?");args.push(q[key]);}
   }
-  const users=await db.all("SELECT u.id,u.business,u.city,u.business_type,p.assigned FROM w_users u LEFT JOIN k_policy p ON p.customer_id=u.id WHERE "+clauses.join(" AND ")+" ORDER BY u.business",args);
+  const users=await db.all("SELECT u.id,u.business,u.city,u.business_type,p.assigned FROM w_users u LEFT JOIN k_policy p ON p.customer_id=u.id LEFT JOIN k_profiles h ON h.customer_id=u.id WHERE "+clauses.join(" AND ")+" ORDER BY u.business",args);
   const rows=[];
   for(const c of users){
    const entries=await loadEntries(db,c.id,to);

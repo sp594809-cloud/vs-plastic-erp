@@ -25,7 +25,7 @@ function mount(app,express,db,env=process.env){
     for(const message of value.messages||[]){
      if(!["stop","unsubscribe","બંધ","बंद"].includes(String(message.text?.body||"").trim().toLowerCase()))continue;
      if(!/^91[6-9]\d{9}$/.test(message.from))continue;
-     await db.run("UPDATE k_policy SET consent=0 WHERE customer_id IN (SELECT id FROM w_users WHERE phone=?)",[message.from.slice(2)]);
+     await db.run("UPDATE k_policy SET consent=0 WHERE customer_id IN (SELECT u.id FROM w_users u LEFT JOIN k_profiles p ON p.customer_id=u.id WHERE COALESCE(NULLIF(p.whatsapp_phone,''),u.phone)=?)",[message.from.slice(2)]);
     }
    }
    res.sendStatus(200);

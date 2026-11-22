@@ -18,6 +18,7 @@ async function run(db,env=process.env,send=fetch){
   for(const {customer_id:id} of customers){
     const job=await db.transaction(async tx=>{
       const c=await tx.one("SELECT business,phone FROM w_users WHERE id=?"+db.lock,[id]);
+      const profile=await tx.one("SELECT language,whatsapp_phone FROM k_profiles WHERE customer_id=?",[id]);
       const p=await tx.one("SELECT consent FROM k_policy WHERE customer_id=?",[id]);
       if(!p?.consent)return;
       const rows=await k.loadEntries(tx,id);
@@ -29,12 +30,12 @@ async function run(db,env=process.env,send=fetch){
       const now=new Date().toISOString();
       if(prior)await tx.run("UPDATE k_deliveries SET status='sending',attempts=attempts+1,amount=?,updated_at=? WHERE send_key=?",[entry.left,now,key]);
       else await tx.run("INSERT INTO k_deliveries(send_key,customer_id,entry_id,stage,amount,status,attempts,updated_at) VALUES(?,?,?,?,?,'sending',1,?)",[key,id,entry.id,stage,entry.left,now]);
-      return {key,to:"91"+c.phone,values:[c.business,(entry.left/100).toFixed(2),entry.due]};
+      return {key,to:"91"+(profile?.whatsapp_phone||c.phone),lang:profile?.language||env.WA_LANGUAGE,values:[c.business,(entry.left/100).toFixed(2),entry.due]};
     });
     if(!job)continue;
     let status="unknown", provider=null;
     try{
-      const resp=await send("https://graph.facebook.com/"+env.WA_GRAPH_VERSION+"/"+env.WA_PHONE_ID+"/messages",{method:"POST",signal:AbortSignal.timeout(12000),headers:{Authorization:"Bearer "+env.WA_TOKEN,"Content-Type":"application/json"},body:JSON.stringify({messaging_product:"whatsapp",to:job.to,type:"template",template:{name:env.WA_APPROVED_TEMPLATE,language:{code:env.WA_LANGUAGE},components:[{type:"body",parameters:job.values.map(text=>({type:"text",text}))}]}})});
+      const resp=await send("https://graph.facebook.com/"+env.WA_GRAPH_VERSION+"/"+env.WA_PHONE_ID+"/messages",{method:"POST",signal:AbortSignal.timeout(12000),headers:{Authorization:"Bearer "+env.WA_TOKEN,"Content-Type":"application/json"},body:JSON.stringify({messaging_product:"whatsapp",to:job.to,type:"template",template:{name:env.WA_APPROVED_TEMPLATE,language:{code:job.lang},components:[{type:"body",parameters:job.values.map(text=>({type:"text",text}))}]}})});
       if(resp.ok){provider=(await resp.json()).messages?.[0]?.id;status=provider?"accepted":"unknown";}
       else status=resp.status===429?"rate_limited":resp.status>=500?"unknown":"rejected";
     }catch{ /* Ambiguous provider outcome requires reconciliation before retry. */ }

@@ -81,3 +81,11 @@ test("only an owner can write off an overdue amount with a reason",async()=>{
  await assert.rejects(add("write_off","201",{note:"Too large"}));
  await add("write_off","50",{note:"Documented decision"});assert.equal(k.summary(await rows()).balance,15000);
 });
+test("inventory-backed sale snapshots tax, price and deducts unreserved stock exactly once",async()=>{
+ const {add,db,rows}=setup();
+ await db.run("INSERT INTO w_products(name,slug,sku,category_id,description,stock,reserved,price,tax) VALUES('Test runner','demo','DEMO',1,'fixture',100,10,65,1800)");
+ const key=k.key();await add("sale","",{key,detailed:"yes",product:"1",qty:"20"});
+ assert.equal((await rows())[0].amount,1534);assert.equal((await db.one("SELECT stock FROM w_products")).stock,80);
+ await add("sale","",{key,detailed:"yes",product:"1",qty:"20"});assert.equal((await db.one("SELECT stock FROM w_products")).stock,80);
+ await assert.rejects(add("sale","",{detailed:"yes",product:"1",qty:"71"}));assert.equal((await rows()).length,1);
+});

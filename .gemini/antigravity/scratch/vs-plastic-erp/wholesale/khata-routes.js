@@ -14,7 +14,7 @@ function mount(app,db,wrap){
   app.use(base,(req,res,next)=>staff.includes(req.user?.role)?next():next(Object.assign(new Error("Staff sign-in required."),{status:403})));
   const scoped=user=>["manager","salesperson"].includes(user.role);
   async function customers(user){
-    return db.all("SELECT u.id,u.business,u.phone,u.contact,u.city,u.business_type,u.status,p.limit_paise,p.terms,p.block_days,p.assigned,p.consent,f.manager_cap,f.yellow_days,f.orange_days,f.red_days FROM w_users u LEFT JOIN k_policy p ON p.customer_id=u.id LEFT JOIN k_preferences f ON f.customer_id=u.id WHERE u.role='customer'"+(scoped(user)?" AND p.assigned=?":"")+" ORDER BY u.business",scoped(user)?[user.id]:[]);
+    return db.all("SELECT u.id,u.business,u.phone,u.contact,u.city,u.business_type,u.status,u.address,u.gstin,u.created_at,h.area,h.secondary_phone,h.whatsapp_phone,h.language,h.notes AS khata_notes,p.limit_paise,p.terms,p.block_days,p.assigned,p.consent,f.manager_cap,f.yellow_days,f.orange_days,f.red_days FROM w_users u LEFT JOIN k_policy p ON p.customer_id=u.id LEFT JOIN k_preferences f ON f.customer_id=u.id LEFT JOIN k_profiles h ON h.customer_id=u.id WHERE u.role='customer'"+(scoped(user)?" AND p.assigned=?":"")+" ORDER BY u.business",scoped(user)?[user.id]:[]);
   }
   async function context(req){
     const c=(await customers(req.user)).find(c=>c.id===Number(req.params.id));
@@ -120,6 +120,20 @@ function mount(app,db,wrap){
       await tx.run("UPDATE k_requests SET status=?,reason=?,reviewer=?,reviewed_at=? WHERE id=?",[b.status,b.reason.slice(0,500),req.user.id,now,r.id]);
     });
     back(res,c.id,"Review recorded");
+  }));
+  app.post(base+"/:id/profile",wrap(async(req,res)=>{
+    const c=await context(req),b=req.body;
+    if(req.user.role!=="admin")k.fail("Owner access required.",403);
+    const mobile=input=>{const n=String(input||"").replace(/[^0-9]/g,"").replace(/^91(?=[0-9]{10}$)/,"");if(n&&!/^[6-9][0-9]{9}$/.test(n))k.fail("Enter a valid mobile number.");return n;};
+    const secondary=mobile(b.secondary),wa=mobile(b.whatsapp),language=b.language;
+    if(!["gu","hi","en"].includes(language))k.fail("Unsupported language.");
+    await db.transaction(async tx=>{
+      await tx.one("SELECT id FROM w_users WHERE id=?"+db.lock,[c.id]);
+      await tx.run("DELETE FROM k_profiles WHERE customer_id=?",[c.id]);
+      await tx.run("INSERT INTO k_profiles(customer_id,area,secondary_phone,whatsapp_phone,language,notes) VALUES(?,?,?,?,?,?)",[c.id,String(b.area||"").slice(0,100),secondary,wa,language,String(b.notes||"").slice(0,500)]);
+      if((c.whatsapp_phone||c.phone)!==(wa||c.phone))await tx.run("UPDATE k_policy SET consent=0 WHERE customer_id=?",[c.id]);
+      await tx.run("INSERT INTO w_audit(actor_id,event,created_at) VALUES(?,?,?)",[req.user.id,"Updated Khata contact profile #"+c.id,new Date().toISOString()]);
+    });back(res,c.id,"Profile updated");
   }));
   app.post(base+"/:id/policy",wrap(async(req,res)=>{
     const c=await context(req),b=req.body;
