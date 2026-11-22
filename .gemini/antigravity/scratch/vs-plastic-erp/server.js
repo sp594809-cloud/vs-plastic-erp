@@ -24,6 +24,7 @@ app.use(
     limit: "2mb",
   }),
 );
+require("./wholesale/khata-webhook").mount(app,express,db);
 app.use(express.urlencoded({ extended: false, limit: "32kb" }));
 app.use((req, res, next) => {
   res.set({
@@ -290,7 +291,7 @@ app.post(
       Date.now() + 86400000,
     ]);
     res.cookie("vs_session", token, { ...opts, maxAge: 86400000 });
-    res.redirect(user.role === "admin" ? "/admin" : "/account");
+    res.redirect(user.role === "admin" ? "/admin" : ["manager","salesperson","accountant"].includes(user.role) ? "/khata" : "/account");
   }),
 );
 app.post(
@@ -593,6 +594,7 @@ app.get("/policies/:type", (req, res) => {
   });
 });
 require("./wholesale/khata-routes").mount(app, db, wrap);
+require("./wholesale/khata-reports").register(app, db, wrap);
 app.use("/admin", admin);
 app.get(
   "/admin",

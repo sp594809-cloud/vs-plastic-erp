@@ -37,3 +37,41 @@ test("past due aging, disqualification on dispute and duplicate external referen
  assert.equal(k.summary(await rows(),"2025-01-10").aging[2],1000);assert.equal(candidate(await rows(),[{kind:"dispute"}],"2025-01-10",[8]),null);
  await add("payment","1",{reference:"T123"});await assert.rejects(add("payment","1",{reference:"T123"}));
 });
+test("posted corrections preserve historic delay and on-time figures",async()=>{
+ const {add,rows}=setup();await add("sale","2000",{posted:"2025-02-01",due:"2025-02-15"});await add("payment","2000",{posted:"2025-02-21"});
+ const h=k.summary(await rows()).history;assert.equal(h.average,20);assert.equal(h.longest,6);assert.equal(h.late,1);assert.equal(h.onTime,0);
+});
+test("private WhatsApp job checks remaining amount, records acceptance and suppresses duplicates",async()=>{
+ const {add,db}=setup();await db.run("UPDATE k_policy SET consent=1");await add("sale","100",{due:k.today()});await add("payment","40");
+ const env={WA_PHONE_ID:"123",WA_TOKEN:"fixture",WA_APPROVED_TEMPLATE:"fixture",WA_LANGUAGE:"gu",WA_GRAPH_VERSION:"v20.0"};
+ let sent=0;const mock=async(url,options)=>{sent++;assert.equal(JSON.parse(options.body).template.components[0].parameters[1].text,"60.00");return {ok:true,json:async()=>({messages:[{id:"fixture"}]})}};
+ const {run}=require("../wholesale/khata-reminders");await run(db,env,mock);await run(db,env,mock);assert.equal(sent,1);
+ assert.equal((await db.one("SELECT status FROM k_deliveries")).status,"accepted");
+});
+function handlers(db){
+ const map={};const app={use(){},post(path,fn){map["POST "+path]=fn},get(path,fn){map["GET "+path]=fn}};
+ require("../wholesale/khata-routes").mount(app,db,fn=>fn);
+ require("../wholesale/khata-reports").register(app,db,fn=>fn);
+ return map;
+}
+test("manager cannot self-authorize exception; owner decision posts exactly once",async()=>{
+ const {db,add,rows}=setup();await add("sale","10001");
+ const fn=handlers(db)["POST /khata/:id/review"], req={user:{role:"manager",id:3},params:{id:"1"},body:{request:"1",status:"approved",reason:"Reviewed by owner"}};
+ await assert.rejects(fn(req,{redirect(){}}));req.user={role:"admin",id:2};await fn(req,{redirect(){}});
+ await assert.rejects(fn(req,{redirect(){}}));assert.equal((await rows()).length,1);assert.equal((await db.one("SELECT reviewer FROM k_requests")).reviewer,2);
+});
+test("promise only receives credit for recorded payments; reversal reopens amount",async()=>{
+ const {db,add}=setup();await add("sale","2000");const routes=handlers(db);
+ const req={user:{role:"admin",id:2},params:{id:"1"},query:{},body:{kind:"promise",amount:"500",date:k.today(),note:"Confirmed by phone"}};
+ await routes["POST /khata/:id/contact"](req,{redirect(){}});
+ async function left(){let amount;await routes["GET /khata/:id"](req,{render(_,v){amount=v.remaining(v.contacts[0])}});return amount;}
+ assert.equal(await left(),50000);await add("payment","300");assert.equal(await left(),20000);
+ await add("payment","200");assert.equal(await left(),0);await add("reversal","",{original:3,note:"Reconciliation"});assert.equal(await left(),20000);
+});
+test("targeted allocations and due-date extensions change open-invoice reminder schedule",async()=>{
+ const {add,db}=setup();await add("sale","100",{due:k.today()});await add("sale","200",{due:k.today()});
+ await add("payment","100",{target:"2",apply:"100"});
+ const all=()=>k.loadEntries(db,1);assert.deepEqual(k.summary(await all()).unpaid.map(e=>e.left),[10000,10000]);
+ await handlers(db)["POST /khata/:id/extend"]({params:{id:"1"},user:{role:"admin",id:2},body:{sale:"1",reason:"Agreed revised terms",due:k.later(k.today(),5)}},{redirect(){}});
+ assert.equal(candidate(await all(),[],k.today(),[0]).entry.id,2);
+});

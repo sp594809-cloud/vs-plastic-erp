@@ -20,7 +20,7 @@ async function run(db,env=process.env,send=fetch){
       const c=await tx.one("SELECT business,phone FROM w_users WHERE id=?"+db.lock,[id]);
       const p=await tx.one("SELECT consent FROM k_policy WHERE customer_id=?",[id]);
       if(!p?.consent)return;
-      const rows=await tx.all("SELECT * FROM k_entries WHERE customer_id=? ORDER BY id",[id]);
+      const rows=await k.loadEntries(tx,id);
       const contacts=await tx.all("SELECT kind FROM k_contacts WHERE customer_id=? ORDER BY id",[id]);
       const hit=candidate(rows,contacts,k.today(),stages);if(!hit)return;
       const {entry,stage}=hit, key=[id,entry.id,entry.due,stage].join("/");
